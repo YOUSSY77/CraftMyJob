@@ -38,7 +38,9 @@ if os.path.exists("datacommunes.csv"):
 # --- OpenAI helper (v1 interface)
 
 def get_gpt_response(prompt, api_key):
+    # On utilise l'interface v1 sans passer de proxies
     client = OpenAI(api_key=api_key)
+    # Veille à ne PAS fournir de paramètre proxies ici
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
@@ -49,6 +51,7 @@ def get_gpt_response(prompt, api_key):
         max_tokens=1200,
     )
     return response.choices[0].message.content
+
 
 # --- France Travail API helpers
 
@@ -241,7 +244,7 @@ if inputs['job_title'] and inputs['missions'] and inputs['skills']:
         token = fetch_ft_token(key_id, key_secret)
         off2 = []
         for pc in postal_codes:
-            off2 += get_ft_offers(token, top6df.iloc[0]['Metet'], pc)
+           off2 += get_ft_offers(token, top6df.iloc[0]['Metier'], pc)
         seen2 = set(); uniq2 = []
         for o in off2:
             url = o.get('contact',{}).get('urlOrigine','')
