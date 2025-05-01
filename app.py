@@ -1,5 +1,5 @@
 import streamlit as st
-import openai
+from openai import OpenAI
 import pandas as pd
 from rapidfuzz import fuzz
 from PyPDF2 import PdfReader
@@ -35,15 +35,15 @@ if os.path.exists("datacommunes.csv"):
     communes_df = load_communes()
     use_autocomplete = True
 
-# --- OpenAI helper
+# --- OpenAI helper (v1 interface)
 
 def get_gpt_response(prompt, api_key):
-    openai.api_key = api_key
-    response = openai.ChatCompletion.create(
+    client = OpenAI(api_key=api_key)
+    response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "Tu es un expert en recrutement et en personal branding."},
-            {"role": "user", "content": prompt},
+            {"role": "user",   "content": prompt},
         ],
         temperature=0.7,
         max_tokens=1200,
@@ -88,9 +88,15 @@ def scorer_metier(inputs, df):
     df['score'] = df.apply(score_row, axis=1)
     return df.nlargest(6, 'score')
 
-# --- Prompt templates
+# --- Prompt templates using display labels
+TEMPLATES = {
+    "📄 Bio LinkedIn": "Rédige une bio LinkedIn engageante, professionnelle.",
+    "✉️ Mail de candidature spontanée": "Écris un mail de candidature spontanée clair et convaincant.",
+    "📃 Mini CV": "Génère un mini-CV 5-7 lignes, souligne deux mots-clés avec underscores.",
+    "🧩 CV optimisé IA": "Rédige un CV optimisé, souligne deux mots-clés avec underscores.",
+}
 
-def generate_prompt(template, inputs, cv_text):
+def generate_prompt(template_label, inputs, cv_text):
     profile = (
         f"Profil :\n"
         f"- Poste : {inputs['job_title']}\n"
@@ -104,16 +110,9 @@ def generate_prompt(template, inputs, cv_text):
     )
     if cv_text:
         profile += f"- Extrait CV (500c) : {cv_text[:500]}...\n"
-    texts = {
-        "Bio": "Rédige une bio LinkedIn engageante, professionnelle.",
-        "Mail": "Écris un mail de candidature spontanée clair et convaincant.",
-        "MiniCV": "Génère un mini-CV 5-7 lignes, souligne deux mots-clés avec underscores.",
-        "CVopt": "Rédige un CV optimisé, souligne deux mots-clés avec underscores.",
-    }
-    return profile + "\n" + texts.get(template, '')
+    return profile + "\n" + TEMPLATES.get(template_label, '')
 
 # --- PDF generation with fpdf2
-
 class PDFGenerator:
     @staticmethod
     def make_pdf(text: str):
@@ -141,29 +140,24 @@ if file_u:
     else:
         cv_text = file_u.read().decode()
 
-job = st.text_input("🔤 Poste recherché")
-missions = st.text_area("📋 Missions souhaitées")
-values = st.text_area("🏢 Valeurs (opt)")
-skills = st.text_area("🧠 Compétences clés")
+inputs = {}
+inputs['job_title'] = st.text_input("🔤 Poste recherché")
+inputs['missions'] = st.text_area("📋 Missions souhaitées")
+inputs['values'] = st.text_area("🏢 Valeurs (opt)")
+inputs['skills'] = st.text_area("🧠 Compétences clés")
 
 # localisation multi
 loc_input = st.text_input("📍 Localisation (villes, séparées par ,)")
 if use_autocomplete:
     opts = communes_df[communes_df['nom_commune'].str.contains(loc_input, case=False, na=False)]['ville_cp'][:10].tolist()
     st.write("Suggestions:", opts)
-    locations = st.multiselect("Choisis villes", opts)
+    inputs['location'] = st.multiselect("Choisis villes", opts)
 else:
-    locations = [x.strip() for x in loc_input.split(',') if x.strip()]
-postal_codes = [
-    re.search(r"\((\d{5})\)", loc).group(1)
-    if re.search(r"\((\d{5})\)", loc)
-    else loc
-    for loc in locations
-]
+    inputs['location'] = [x.strip() for x in loc_input.split(',') if x.strip()]
 
-exp = st.radio("🎯 Expérience", ["Débutant(e)","Expérimenté(e)","Senior"])
-ctr = st.selectbox("📄 Contrat", ["CDI","Freelance","CDD","Stage"])
-remote = st.checkbox("🏠 Remote")
+inputs['experience_level'] = st.radio("🎯 Expérience", ["Débutant(e)","Expérimenté(e)","Senior"])
+inputs['contract_type'] = st.selectbox("📄 Contrat", ["CDI","Freelance","CDD","Stage"])
+inputs['remote'] = st.checkbox("🏠 Remote")
 
 # API keys
 st.subheader("🔑 Clés API")
@@ -174,49 +168,41 @@ key_secret = st.text_input("FT Client Secret", type='password')
 # choix de génération
 st.subheader("⚙️ Génération")
 choices = st.multiselect(
-    "",
-    ["Bio","Mail","MiniCV","CVopt"],
-    default=["Bio"]
+    "Que veux-tu générer ?",
+    list(TEMPLATES.keys()),
+    default=["📄 Bio LinkedIn", "✉️ Mail de candidature spontanée"]
 )
 
 # actions
-results = {}
+iresults = {}
 off_main = []
 if st.button("🚀 Générer & Chercher"):
     if not key_o:
         st.error("OpenAI Key requise")
         st.stop()
-    inp = {
-        'job_title': job,
-        'missions': missions,
-        'values': values,
-        'skills': skills,
-        'location': locations,
-        'experience_level': exp,
-        'contract_type': ctr,
-        'remote': remote
-    }
+    # Génération IA
     for ch in choices:
-        results[ch] = get_gpt_response(generate_prompt(ch, inp, cv_text), key_o)
-    if key_id and key_secret and postal_codes:
+        prompt = generate_prompt(ch, inputs, cv_text)
+        iresults[ch] = get_gpt_response(prompt, key_o)
+    # Recup offres FT
+    if key_id and key_secret and inputs['location']:
         token = fetch_ft_token(key_id, key_secret)
+        postal_codes = [m.group(1) if (m := re.search(r"\((\d{5})\)", loc)) else loc for loc in inputs['location']]
         for pc in postal_codes:
-            off_main += get_ft_offers(token, f"{job} {skills}", pc)
+            off_main += get_ft_offers(token, f"{inputs['job_title']} {inputs['skills']}", pc)
         # dédupe
-        seen = set()
-        unique = []
+        seen = set(); unique = []
         for o in off_main:
             url = o.get('contact',{}).get('urlOrigine','')
             if url and url not in seen:
-                seen.add(url)
-                unique.append(o)
+                seen.add(url); unique.append(o)
         off_main = unique
 
 # affichage IA
-for ch, txt in results.items():
+for ch, txt in iresults.items():
     st.subheader(ch)
     st.markdown(txt)
-    if ch == 'CVopt':
+    if ch == '🧩 CV optimisé IA':
         pdf_bytes = PDFGenerator.make_pdf(txt)
         st.download_button(
             '📥 Télécharger PDF', data=pdf_bytes,
@@ -224,49 +210,40 @@ for ch, txt in results.items():
         )
 
 # affichage offres
-if off_main is not None:
+if off_main:
     st.header("🔎 Offres Pôle Emploi")
-    if off_main:
-        for o in off_main:
-            t = o.get('intitule','—')
-            e = o.get('entreprise',{}).get('nomEntreprise','—')
-            l = o.get('lieuTravail',{}).get('libelle','—')
-            u = o.get('contact',{}).get('urlOrigine','#')
-            st.markdown(f"**{t}**  \n{e} – {l}  \n[Voir]({u})\n---")
-    else:
-        st.info("Aucune offre trouvée.")
+    for o in off_main:
+        t = o.get('intitule','—')
+        e = o.get('entreprise',{}).get('nomEntreprise','—')
+        l = o.get('lieuTravail',{}).get('libelle','—')
+        u = o.get('contact',{}).get('urlOrigine','#')
+        st.markdown(f"**{t}**  \n{e} – {l}  \n[Voir]({u})\n---")
+else:
+    st.info("Aucune offre trouvée.")
 
 # SIS
 st.subheader("🧠 SIS – Matching métiers")
-if job and missions and skills:
+if inputs['job_title'] and inputs['missions'] and inputs['skills']:
     top6df = scorer_metier(
-        {'job_title': job, 'missions': missions, 'skills': skills},
+        {'job_title': inputs['job_title'], 'missions': inputs['missions'], 'skills': inputs['skills']},
         df_metiers.copy()
     )
     st.success("Top 6 métiers ROME/ESCO")
-    for _, r in top6df.iterrows():
-        st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
-    if key_id and key_secret and postal_codes:
+    for _, r in top6df.iterrows(): st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
+    if key_id and key_secret and inputs['location']:
         token = fetch_ft_token(key_id, key_secret)
         off2 = []
         for pc in postal_codes:
-            off2 += get_ft_offers(token, top6df.iloc[0]['Metier'], pc)
-        seen2 = set()
-        uniq2 = []
+            off2 += get_ft_offers(token, top6df.iloc[0]['Metet'], pc)
+        seen2 = set(); uniq2 = []
         for o in off2:
             url = o.get('contact',{}).get('urlOrigine','')
-            if url and url not in seen2:
-                seen2.add(url)
-                uniq2.append(o)
-        st.subheader(f"🔎 Offres pour {top6df.iloc[0]['Metier']}")
+            if url and url not in seen2: seen2.add(url); uniq2.append(o)
+        st.subheader(f"🔎 Offres pour {top6df.iloc[0]['Metet']}")
         if uniq2:
             for o in uniq2:
-                t = o.get('intitule','—')
-                e = o.get('entreprise',{}).get('nomEntreprise','—')
-                l = o.get('lieuTravail',{}).get('libelle','—')
-                u = o.get('contact',{}).get('urlOrigine','#')
+                t = o.get('intitule','—'); e = o.get('entreprise',{}).get('nomEntreprise','—'); l = o.get('lieuTravail',{}).get('libelle','—'); u = o.get('contact',{}).get('urlOrigine','#')
                 st.markdown(f"**{t}** – {e} ({l})  \n[Voir]({u})")
-        else:
-            st.info("Aucune offre trouvée pour ce métier.")
+        else: st.info("Aucune offre trouvée pour ce métier.")
 else:
     st.info("Renseignez Intitulé, Missions et Compétences.")
