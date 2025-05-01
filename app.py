@@ -7,6 +7,11 @@ import io
 from fpdf import FPDF
 import pandas as pd
 from rapidfuzz import fuzz
+import os
+# Supprime les proxies hérités de l'environnement pour ne pas polluer OpenAI.Client
+for v in ("HTTP_PROXY","http_proxy","HTTPS_PROXY","https_proxy"):
+    os.environ.pop(v, None)
+
 
 # --- Page config
 st.set_page_config(page_title="CraftMyJob – by Job Seekers Hub France", layout="centered")
@@ -118,15 +123,15 @@ def load_métier_ref():
     return pd.read_csv("referentiel_metiers_craftmyjob_final.csv")
 
 df_ref = load_métier_ref()
-def score_metiers(inp):
-    df = df_ref.copy()
-    def sc(r):
-        t = fuzz.token_set_ratio(r["Metier"], inp["job_title"])
-        a = fuzz.token_set_ratio(r["Activites"], inp["missions"])
-        c = fuzz.token_set_ratio(r["Competences"], inp["skills"])
-        return 0.3*t + 0.3*a + 0.4*c
-    df["score"] = df.apply(sc, axis=1)
-    return df.nlargest(6,"score")
+def scorer_metier(inputs, df):
+    def score_row(row):
+        s1 = fuzz.token_set_ratio(row["Metier"],     inputs["job_title"])
+        s2 = fuzz.token_set_ratio(row["Activites"],  inputs["missions"])
+        s3 = fuzz.token_set_ratio(row["Competences"],inputs["skills"])
+        # nouveau poids : 30% poste / 20% activités / 50% compétences
+        return 0.3*s1 + 0.2*s2 + 0.5*s3
+    df["score"] = df.apply(score_row, axis=1)
+    return df.nlargest(6, "score")
 
 # --- Bouton principal
 if st.button("🚀 Générer & Chercher"):
