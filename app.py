@@ -25,9 +25,10 @@ df_metiers = load_metiers()
 
 # --- Load communes for autocomplete
 use_autocomplete = False
+communes_df = None
 if os.path.exists("datacommunes.csv"):
     @st.cache_data
-def load_communes():
+    def load_communes():
         df = pd.read_csv("datacommunes.csv", dtype=str)
         df["ville_cp"] = df["nom_commune"].str.strip() + " (" + df["code_postal"].str.strip() + ")"
         return df
@@ -172,11 +173,14 @@ key_secret = st.text_input("FT Client Secret", type='password')
 
 # choix de génération
 st.subheader("⚙️ Génération")
-choices = st.multiselect("",
-    ["Bio","Mail","MiniCV","CVopt"], default=["Bio"]
+choices = st.multiselect(
+    "",
+    ["Bio","Mail","MiniCV","CVopt"],
+    default=["Bio"]
 )
 
-# actions\ nresults = {}
+# actions
+results = {}
 off_main = []
 if st.button("🚀 Générer & Chercher"):
     if not key_o:
@@ -215,10 +219,8 @@ for ch, txt in results.items():
     if ch == 'CVopt':
         pdf_bytes = PDFGenerator.make_pdf(txt)
         st.download_button(
-            '📥 Télécharger PDF',
-            data=pdf_bytes,
-            file_name='CV_optimise.pdf',
-            mime='application/pdf'
+            '📥 Télécharger PDF', data=pdf_bytes,
+            file_name='CV_optimise.pdf', mime='application/pdf'
         )
 
 # affichage offres
@@ -256,7 +258,7 @@ if job and missions and skills:
             if url and url not in seen2:
                 seen2.add(url)
                 uniq2.append(o)
-        st.subheader(f"🔎 Offres pour {top6df.iloc[0]['Metet']}")
+        st.subheader(f"🔎 Offres pour {top6df.iloc[0]['Metier']}")
         if uniq2:
             for o in uniq2:
                 t = o.get('intitule','—')
