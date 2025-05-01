@@ -1,3 +1,8 @@
+import os
+# On vide les proxies pour que la v1 de OpenAI.Client n’en hérite pas
+for v in ("HTTP_PROXY","http_proxy","HTTPS_PROXY","https_proxy"):
+    os.environ.pop(v, None)
+
 import streamlit as st
 from openai import OpenAI
 import requests
@@ -169,6 +174,6 @@ if st.button("🚀 Générer & Chercher"):
 
         # Matching ROME/ESCO
         st.subheader("🧠 SIS – Matching métiers")
-        top6 = score_metiers(inputs)
+        top6 = scorer_metier(inputs, df_metiers.copy())
         for _,r in top6.iterrows():
             st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
