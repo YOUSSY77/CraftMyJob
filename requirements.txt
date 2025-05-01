@@ -5,4 +5,4 @@ rapidfuzz
 PyPDF2==3.0.1
 python-docx==0.8.11
 requests>=2.31.0
-+ fpdf2==2.6.0
+fpdf2==2.6.0
