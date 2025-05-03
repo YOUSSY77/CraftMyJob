@@ -120,13 +120,19 @@ def fetch_ft_token(cid: str, secret: str) -> str:
     return r.json()["access_token"]
 
 def search_offres(token: str, mots: str, loc: str, limit: int = 7) -> list:
-    url = "https://api.pole-emploi.io/partenaire/offresdemploi/v2/offres/search"
-    h = {"Authorization": f"Bearer {token}"}
-    p = {"motsCles": mots, "localisation": loc, "range": f"0-{limit-1}"}
-    r = requests.get(url, headers=h, params=p, timeout=30)
+    url     = "https://api.pole-emploi.io/partenaire/offresdemploi/v2/offres/search"
+    headers = {"Authorization": f"Bearer {token}"}
+    params  = {"motsCles": mots, "localisation": loc, "range": f"0-{limit-1}"}
+
+    r = requests.get(url, headers=headers, params=params, timeout=30)
+    # Affiche pour debug
+    st.write(f"--- Recherche FT pour « {loc} » → HTTP {r.status_code}")
     if r.status_code != 200:
+        st.error(f"Erreur FT API {r.status_code} : {r.text}")
         return []
-    return r.json().get("resultats", [])
+    data = r.json().get("resultats", [])
+    st.write(f"  • Résultats bruts : {len(data)} offres")  # nombre d'offres reçues
+    return data
 
 # ── Chargement référentiel métiers + scoring
 @st.cache_data
