@@ -14,7 +14,8 @@ import pandas as pd
 from rapidfuzz import fuzz
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-
+import requests
+import streamlit as st
 
 
 # ── Config page
@@ -109,39 +110,55 @@ class PDFGen:
         buf.seek(0)
         return buf
 
-# ── Pôle-Emploi OAuth2 & recherche
-def fetch_ft_token(cid: str, secret: str) -> str:
-    url = "https://entreprise.pole-emploi.fr/connexion/oauth2/access_token?realm=/partenaire"
+
+# ── 1) OAuth2 Pôle-Emploi / France Travail (identique au notebook)
+def fetch_ft_token(client_id: str, client_secret: str) -> str:
+    auth_url = (
+        "https://entreprise.pole-emploi.fr"
+        "/connexion/oauth2/access_token?realm=/partenaire"
+    )
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
     data = {
         "grant_type":    "client_credentials",
-        "client_id":     cid,
-        "client_secret": secret,
+        "client_id":     client_id,
+        "client_secret": client_secret,
         "scope":         "api_offresdemploiv2 o2dsoffre"
     }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    r = requests.post(url, data=data, headers=headers, timeout=30)
-    r.raise_for_status()
-    return r.json()["access_token"]
+    resp = requests.post(auth_url, data=data, headers=headers, timeout=10)
+    resp.raise_for_status()
+    return resp.json()["access_token"]
 
-def search_offres(token: str, mots: str, loc: str, limit: int = 7) -> list:
-    url     = "https://api.pole-emploi.io/partenaire/offresdemploi/v2/offres/search"
+# ── 2) Recherche d’offres
+def search_offres(
+    token: str,
+    mots: str = "",
+    localisation: str = "",
+    limit: int = 7
+) -> list:
+    url = (
+        "https://api.francetravail.io"
+        "/partenaire/offresdemploi/v2/offres/search"
+    )
     headers = {"Authorization": f"Bearer {token}"}
-    params  = {"motsCles": mots, "localisation": loc, "range": f"0-{limit-1}"}
+    params = {
+        "motsCles":     mots,
+        "localisation": localisation,
+        "range":        f"0-{limit-1}"
+    }
 
-    r = requests.get(url, headers=headers, params=params, timeout=30)
-    st.write(f"Recherche FT pour « {loc} » → HTTP {r.status_code}")
+    r = requests.get(url, headers=headers, params=params, timeout=10)
+    st.write(f"Recherche FT « {localisation} » → HTTP {r.status_code}")
 
-    # On accepte 200, 206 (partial) et 204 (no content) comme succès
+    # Accepter 200, 206 et 204 comme succès
     if r.status_code == 204:
-        st.info(f"Aucune offre trouvée pour {loc} (204 No Content)")
+        st.info(f"Aucune offre pour « {localisation} » (204 No Content)")
         return []
-
     if r.status_code not in (200, 206):
-        st.error(f"❌ Erreur FT API {r.status_code} : {r.text}")
+        st.error(f"❌ FT API {r.status_code} : {r.text}")
         return []
 
     data = r.json().get("resultats", [])
-    st.write(f"  • Nombre d’offres reçues pour {loc} : {len(data)}")
+    st.write(f"  • {len(data)} offres reçues")
     return data
 
 
@@ -215,22 +232,13 @@ if st.button("🚀 Générer & Chercher"):
     # — Offres Pôle-Emploi
     if ft_client_id and ft_secret and locations:
         try:
-            token = fetch_ft_token(ft_client_id, ft_secret)
-            st.subheader("🔎 Offres Pôle-Emploi")
-            for loc in locations:
-                offres = search_offres(token, f"{job_title} {skills}", loc)
-                if offres:
-                    for o in offres:
-                        st.markdown(
-                            f"**{o['intitule']}** – {o['entreprise']['nomEntreprise']} – "
-                            f"{o['lieuTravail']['libelle']}  \n"
-                            f"[Voir l'offre]({o['contact']['urlOrigine']})\n---"
-                        )
-                else:
-                    st.info(f"Aucune offre pour {loc}")
-        except Exception as e:
-            st.error(f"❌ Erreur Pôle-Emploi : {e}")
-
+            token = fetch_ft_token(ft_client_id, ft_client_secret)
+offres = search_offres(
+    token,
+    mots=f"{job_title} {skills}",
+    localisation=",".join(postal_codes),
+    limit=7
+)
     # — Matching métiers
     st.subheader("🧠 SIS – Matching métiers ROME/ESCO")
     top6 = scorer_metier(inp, df_metiers.copy(), top_k=6)
