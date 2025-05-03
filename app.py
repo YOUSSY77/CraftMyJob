@@ -12,6 +12,10 @@ import io
 from fpdf import FPDF
 import pandas as pd
 from rapidfuzz import fuzz
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+
 
 # ── Config page
 st.set_page_config(page_title="CraftMyJob – by Job Seekers Hub France", layout="centered")
@@ -141,21 +145,41 @@ def search_offres(token: str, mots: str, loc: str, limit: int = 7) -> list:
     return data
 
 
-# ── Chargement référentiel métiers + scoring
+# ── Chargement référentiel métiers
 @st.cache_data
 def load_ref() -> pd.DataFrame:
     return pd.read_csv("referentiel_metiers_craftmyjob_final.csv")
 
 df_metiers = load_ref()
 
-def scorer_metier(inp: dict, df: pd.DataFrame) -> pd.DataFrame:
-    def score(r):
-        s1 = fuzz.token_set_ratio(r["Metier"],      inp["job_title"])
-        s2 = fuzz.token_set_ratio(r["Activites"],   inp["missions"])
-        s3 = fuzz.token_set_ratio(r["Competences"], inp["skills"])
-        return 0.3*s1 + 0.2*s2 + 0.5*s3
-    df["score"] = df.apply(score, axis=1)
-    return df.nlargest(6, "score")
+# ── Construction TF-IDF sur Activites + Competences + Metier
+@st.cache_data(show_spinner=False)
+def build_tfidf(df: pd.DataFrame):
+    corpus = (
+        df["Activites"].fillna("") + " "
+      + df["Competences"].fillna("") + " "
+      + df["Metier"].fillna("")
+    ).tolist()
+    vect = TfidfVectorizer(stop_words="french", max_features=2000)
+    X = vect.fit_transform(corpus)
+    return vect, X
+
+vect, X_ref = build_tfidf(df_metiers)
+
+# ── Scoring métier via cosinus
+def scorer_metier(inp: dict, df: pd.DataFrame, top_k: int = 6) -> pd.DataFrame:
+    # Document utilisateur
+    user_doc = " ".join([
+        inp["missions"],
+        inp["skills"],
+        inp["job_title"]
+    ])
+    v_user = vect.transform([user_doc])
+    cosines = cosine_similarity(v_user, X_ref).flatten()
+    df2 = df.copy()
+    df2["score"] = (cosines * 100).round(1)
+    return df2.nlargest(top_k, "score")
+
 
 # ── Bouton principal
 if st.button("🚀 Générer & Chercher"):
@@ -209,6 +233,6 @@ if st.button("🚀 Générer & Chercher"):
 
     # — Matching métiers
     st.subheader("🧠 SIS – Matching métiers ROME/ESCO")
-    top6 = scorer_metier(inp, df_metiers.copy())
+    top6 = scorer_metier(inp, df_metiers.copy(), top_k=6)
     for _, r in top6.iterrows():
         st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
