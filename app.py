@@ -183,15 +183,17 @@ def load_ref() -> pd.DataFrame:
 df_metiers = load_ref()
 
 @st.cache_data(show_spinner=False)
-def build_tfidf(df):
+def build_tfidf(df: pd.DataFrame):
     corpus = (
-        df["Activites"].fillna("") + " " +
-        df["Competences"].fillna("") + " " +
-        df["Metier"].fillna("")
-    )
-    vect = TfidfVectorizer(stop_words="french", max_features=2000)
+        df["Activites"].fillna("") + " "
+      + df["Competences"].fillna("") + " "
+      + df["Metier"].fillna("")
+    ).tolist()
+    # on retire stop_words pour éviter l'erreur de paramètre invalide
+    vect = TfidfVectorizer(max_features=2000)
     X = vect.fit_transform(corpus)
     return vect, X
+
 
 vect, X_ref = build_tfidf(df_metiers)
 
