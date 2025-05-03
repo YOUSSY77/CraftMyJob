@@ -23,30 +23,40 @@ st.set_page_config(
 st.title("✨ CraftMyJob")
 st.caption("by Job Seekers Hub France 🇫🇷")
 
-# ── 1) Chargement des communes pour l'autocomplete
-@st.cache_data
-def load_communes():
-    # repérer automatiquement le CSV commu nes
-    fn = next((f for f in os.listdir() if f.lower().startswith("datacommunes") and f.lower().endswith(".csv")), None)
-    if fn is None:
-        return pd.DataFrame(columns=["ville_cp"])
-    df = pd.read_csv(fn, sep=";", dtype=str, encoding="latin-1")
-    # trouver les colonnes "nom_commune" et "code_postal"
-    name_col = next((c for c in df.columns if "Nom_de_la_commune" in c or "nom_commune" in c), None)
-    cp_col   = next((c for c in df.columns if "Code_postal" in c or "code_postal" in c), None)
-    if not name_col or not cp_col:
-        return pd.DataFrame(columns=["ville_cp"])
-    df["ville_cp"] = df[name_col].str.strip() + " (" + df[cp_col].str.strip() + ")"
-    return df
+# ── Autocomplétion via Geo API du Gouvernement ──────────
+def search_communes(query: str, limit: int = 10) -> list[str]:
+    """
+    Renvoie jusqu'à `limit` suggestions "Nom (CP)" pour la chaîne `query`.
+    """
+    url = "https://geo.api.gouv.fr/communes"
+    params = {
+        "nom":      query,
+        "fields":   "nom,codesPostaux",
+        "boost":    "population",
+        "limit":    limit
+    }
+    r = requests.get(url, params=params, timeout=5)
+    r.raise_for_status()
+    communes = []
+    for c in r.json():
+        # on prend le premier code postal
+        cp = c["codesPostaux"][0] if c["codesPostaux"] else "00000"
+        communes.append(f"{c['nom']} ({cp})")
+    return communes
 
-communes_df = load_communes()
+# --- UI : champ texte + multiselect
+typed = st.text_input("📍 Commencez à taper une ville…")
+suggestions = []
+if typed:
+    try:
+        suggestions = search_communes(typed)
+    except Exception:
+        suggestions = []
+locations = st.multiselect("Sélectionnez une ou plusieurs villes", options=suggestions)
+# extraire les CP
+postal_codes = [re.search(r"\((\d{5})\)", loc).group(1) 
+                for loc in locations if re.search(r"\((\d{5})\)", loc)]
 
-# ── 2) Chargement référentiel métiers pour SIS
-@st.cache_data
-def load_metiers():
-    return pd.read_csv("referentiel_metiers_craftmyjob_final.csv", dtype=str)
-
-df_metiers = load_metiers()
 
 # ── 3) Construction TF-IDF pour matching métier
 @st.cache_data
