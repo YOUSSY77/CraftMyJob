@@ -125,13 +125,14 @@ def search_offres(token: str, mots: str, loc: str, limit: int = 7) -> list:
     params  = {"motsCles": mots, "localisation": loc, "range": f"0-{limit-1}"}
 
     r = requests.get(url, headers=headers, params=params, timeout=30)
-    # Affiche pour debug
-    st.write(f"--- Recherche FT pour « {loc} » → HTTP {r.status_code}")
-    if r.status_code != 200:
+    st.write(f"Recherche FT pour « {loc} » → HTTP {r.status_code}")
+    # 💡 accepter 200 ET 206
+    if r.status_code not in (200, 206):
         st.error(f"Erreur FT API {r.status_code} : {r.text}")
         return []
+
     data = r.json().get("resultats", [])
-    st.write(f"  • Résultats bruts : {len(data)} offres")  # nombre d'offres reçues
+    st.write(f"  • Nombre d’offres reçues : {len(data)}")
     return data
 
 # ── Chargement référentiel métiers + scoring
