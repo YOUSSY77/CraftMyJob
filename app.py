@@ -28,7 +28,7 @@ REGIONS_MAP = {
     "ile de france": ["75","77","78","91","92","93","94","95"]
 }
 
-# ── 1) Que souhaites-tu faire dans la vie ?  
+# ── 1️⃣ Que souhaites-tu faire dans la vie ?
 st.header("1️⃣ Que souhaites-tu faire dans la vie ?")
 uploaded_cv = st.file_uploader("📂 Optionnel : ton CV", type=["pdf","docx","txt"])
 cv_text = ""
@@ -74,13 +74,13 @@ for loc in locations:
     # sinon on tente la commune brute
     postal_codes.append(loc)
 
-# ── 2) Clés API
+# ── 2️⃣ Tes clés API
 st.header("2️⃣ Tes clés API")
 openai_key   = st.text_input("🔑 OpenAI API Key", type="password")
 ft_client_id = st.text_input("🔑 Pôle-Emploi Client ID", type="password")
 ft_secret    = st.text_input("🔑 Pôle-Emploi Client Secret", type="password")
 
-# ── 3) Générations IA
+# ── 3️⃣ Générations IA
 st.header("3️⃣ Générations IA")
 templates = {
     "📄 Bio LinkedIn":           "Rédige une bio LinkedIn engageante et professionnelle.",
@@ -103,7 +103,7 @@ def get_gpt_response(prompt: str, api_key: str) -> str:
     payload = {
         "model": "gpt-3.5-turbo",
         "messages": [
-            {"role": "system", "content": 
+            {"role": "system", "content":
                 "Tu es un expert en recrutement et en personal branding."},
             {"role": "user",   "content": prompt}
         ],
@@ -142,9 +142,9 @@ class PDFGen:
         buf.seek(0)
         return buf
 
-# ── 4) Matching & Offres
-st.header("4️⃣ Matching et Offres")
+# ── 4️⃣ Matching & Offres
 
+# --- OAuth2 Pôle-Emploi
 def fetch_ft_token(cid: str, sec: str) -> str:
     auth_url = (
         "https://entreprise.pole-emploi.fr"
@@ -160,6 +160,7 @@ def fetch_ft_token(cid: str, sec: str) -> str:
     resp.raise_for_status()
     return resp.json()["access_token"]
 
+# --- Recherche d’offres
 def search_offres(token: str, mots: str, loc: str, limit: int = 5) -> list:
     url = (
         "https://api.francetravail.io"
@@ -168,20 +169,22 @@ def search_offres(token: str, mots: str, loc: str, limit: int = 5) -> list:
     headers = {"Authorization": f"Bearer {token}"}
     params = {"motsCles": mots, "localisation": loc, "range": f"0-{limit-1}"}
     r = requests.get(url, headers=headers, params=params, timeout=10)
+    # on gère 204 / 200 / 206
     if r.status_code == 204:
         return []
-    if r.status_code not in (200,206):
-        st.error(f"FT API {r.status_code} : {r.text}")
+    if r.status_code not in (200, 206):
+        st.error(f"❌ FT API {r.status_code} : {r.text}")
         return []
     return r.json().get("resultats", [])
 
-# ── 5) SIS – Dis-moi ce que tu sais faire
+# --- Chargement référentiel métiers
 @st.cache_data
 def load_ref() -> pd.DataFrame:
     return pd.read_csv("referentiel_metiers_craftmyjob_final.csv")
 
 df_metiers = load_ref()
 
+# --- TF-IDF pour SIS
 @st.cache_data(show_spinner=False)
 def build_tfidf(df: pd.DataFrame):
     corpus = (
@@ -189,11 +192,9 @@ def build_tfidf(df: pd.DataFrame):
       + df["Competences"].fillna("") + " "
       + df["Metier"].fillna("")
     ).tolist()
-    # on retire stop_words pour éviter l'erreur de paramètre invalide
     vect = TfidfVectorizer(max_features=2000)
     X = vect.fit_transform(corpus)
     return vect, X
-
 
 vect, X_ref = build_tfidf(df_metiers)
 
@@ -207,19 +208,15 @@ def scorer_metier(inp: dict, df: pd.DataFrame, top_k: int = 6) -> pd.DataFrame:
 
 # ── ACTION lorsqu'on clique
 if st.button("🚀 Lancer tout"):
+    # IA
     if not openai_key:
         st.error("🔑 Ta clé OpenAI est requise"); st.stop()
-    if not (ft_client_id and ft_secret):
-        st.error("🔑 Tes identifiants Pole-Emploi sont requis"); st.stop()
-
     inp = {
         "job_title": job_title, "missions": missions,
         "values": values,     "skills": skills,
         "locations": locations, "experience_level": experience_level,
         "contract_type": contract_type, "remote": remote
     }
-
-    # — IA
     for lbl in choices:
         try:
             out = get_gpt_response(generate_prompt(lbl, inp, cv_text), openai_key)
@@ -231,32 +228,49 @@ if st.button("🚀 Lancer tout"):
                                    file_name="CV_optimise.pdf",
                                    mime="application/pdf")
         except Exception as e:
-            st.error(f"Erreur IA ({lbl}) : {e}")
+            st.error(f"❌ Erreur IA ({lbl}) : {e}")
 
-    # — Offres France Travail
-    token = fetch_ft_token(ft_client_id, ft_secret)
+    # Offres France Travail
     st.subheader("🔎 Top 5 offres correspondant à ton profil")
-    mots = f"{job_title} {skills}"
-    offres_all = []
-    for pc in postal_codes:
-        offres_all += search_offres(token, mots, pc, limit=5)
-    # dédupe
-    seen = set(); uniq = []
-    for o in offres_all:
-        url = o.get("contact",{}).get("urlOrigine","")
-        if url and url not in seen:
-            seen.add(url); uniq.append(o)
-    for o in uniq[:5]:
-        st.markdown(f"**{o['intitule']}** – {o['lieuTravail']['libelle']}  \n"
-                    f"[Voir]({o['contact']['urlOrigine']})\n---")
+    if not (ft_client_id and ft_secret):
+        st.info("ℹ️ Renseignez vos identifiants Pôle-Emploi pour la recherche d’offres.")
+    else:
+        try:
+            token = fetch_ft_token(ft_client_id, ft_secret)
+        except requests.HTTPError as auth_err:
+            st.error(f"❌ Auth Pôle-Emploi échouée : {auth_err.response.status_code} – {auth_err.response.text}")
+            offres = []
+        else:
+            offres = []
+            for pc in postal_codes:
+                try:
+                    subset = search_offres(token, f"{job_title} {skills}", pc, limit=5)
+                except Exception as e:
+                    st.error(f"❌ Erreur FT pour « {pc} » : {e}")
+                    subset = []
+                offres.extend(subset)
+        # dédupe
+        seen = set(); uniq = []
+        for o in offres:
+            url = o.get("contact",{}).get("urlOrigine","")
+            if url and url not in seen:
+                seen.add(url); uniq.append(o)
+        if uniq:
+            for o in uniq[:5]:
+                st.markdown(f"**{o.get('intitule','—')}** – {o.get('lieuTravail',{}).get('libelle','—')}  \n"
+                            f"[Voir]({o.get('contact',{}).get('urlOrigine','#')})\n---")
+        else:
+            st.info("🔍 Aucune offre trouvée avec ces critères.")
 
-    # — SIS
+    # SIS – Matching métiers
     st.subheader("🧠 SIS – Les métiers qui te correspondent")
     top6 = scorer_metier(inp, df_metiers.copy(), top_k=6)
     for _, r in top6.iterrows():
         st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
-        # offres par métier
-        offres2 = search_offres(token, r["Metet"] if "Metet" in r else r["Metier"], postal_codes[0], limit=3)
-        for o in offres2:
-            st.write(f"  • {o['intitule']} ({o['lieuTravail']['libelle']})")
-
+        # afficher les 3 offres pour ce métier
+        try:
+            subs = search_offres(token, r["Metier"], postal_codes[0], limit=3)
+        except Exception:
+            subs = []
+        for o in subs:
+            st.markdown(f"  • {o.get('intitule','—')} ({o.get('lieuTravail',{}).get('libelle','—')})")
