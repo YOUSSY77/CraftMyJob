@@ -15,6 +15,10 @@ import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+# pour stocker la sélection persistante
+if "locations" not in st.session_state:
+    st.session_state.locations = []
+    
 # ── Page config
 st.set_page_config(
     page_title="CraftMyJob – by Job Seekers Hub France",
@@ -151,31 +155,33 @@ missions  = st.text_area("📋 Missions principales")
 values    = st.text_area("🏢 Valeurs (facultatif)")
 skills    = st.text_area("🧠 Compétences clés")
 
-# Autocomplétion multi-villes
+# ── Autocomplétion multi-villes via geo.api.gouv.fr ──
 typed = st.text_input("📍 Commencez à taper une ville…")
-# on récupère les suggestions de l'API GOV
-raw_suggestions = search_communes(typed) if typed else []
-# on conserve aussi les villes déjà sélectionnées pour ne pas les perdre
-all_suggestions = list(dict.fromkeys(locations + raw_suggestions))
-locations = st.multiselect(
-    "Sélectionnez une ou plusieurs villes",
-    options=all_suggestions,
-    default=locations
-)
-# extraction des codes postaux
-postal_codes = [
-    m.group(1)
-    for loc in locations
-    if (m := re.search(r"\((\d{5})\)", loc))
-]
+raw_suggestions = []
+if typed:
+    try:
+        raw_suggestions = search_communes(typed)
+    except Exception:
+        raw_suggestions = []
 
+# On fusionne les anciennes sélections (st.session_state.locations) avec les nouvelles propositions
+options = list(dict.fromkeys(st.session_state.locations + raw_suggestions))
+
+# Multiselect avec key="locations" pour mémoriser la sélection dans session_state
+st.session_state.locations = st.multiselect(
+    "Sélectionnez une ou plusieurs villes", 
+    options=options,
+    default=st.session_state.locations,
+    key="locations"
+)
 
 # Extraction des codes postaux
-postal_codes = [
-    m.group(1)
-    for loc in locations
-    if (m := re.search(r"\((\d{5})\)", loc))
-]
+postal_codes = []
+for loc in st.session_state.locations:
+    m = re.search(r"\((\d{5})\)", loc)
+    if m:
+        postal_codes.append(m.group(1))
+
 
 experience_level = st.radio("🎯 Niveau d'expérience", ["Débutant(e)","Expérimenté(e)","Senior"])
 contract_type    = st.selectbox("📄 Type de contrat", ["CDI","Freelance","CDD","Stage"])
