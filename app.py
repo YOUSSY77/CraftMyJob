@@ -151,10 +151,24 @@ missions  = st.text_area("📋 Missions principales")
 values    = st.text_area("🏢 Valeurs (facultatif)")
 skills    = st.text_area("🧠 Compétences clés")
 
-# Autocomplete villes
+# Autocomplétion multi-villes
 typed = st.text_input("📍 Commencez à taper une ville…")
-suggestions = search_communes(typed) if typed else []
-locations = st.multiselect("Sélectionnez une ou plusieurs villes", options=suggestions)
+# on récupère les suggestions de l'API GOV
+raw_suggestions = search_communes(typed) if typed else []
+# on conserve aussi les villes déjà sélectionnées pour ne pas les perdre
+all_suggestions = list(dict.fromkeys(locations + raw_suggestions))
+locations = st.multiselect(
+    "Sélectionnez une ou plusieurs villes",
+    options=all_suggestions,
+    default=locations
+)
+# extraction des codes postaux
+postal_codes = [
+    m.group(1)
+    for loc in locations
+    if (m := re.search(r"\((\d{5})\)", loc))
+]
+
 
 # Extraction des codes postaux
 postal_codes = [
@@ -253,11 +267,32 @@ if st.button("🚀 Lancer tout"):
         st.warning("⚠️ Pour voir les offres, renseigne tes identifiants Pôle-Emploi et au moins une ville.")
 
     # — SIS : Top 6 métiers + Top 3 offres par métier
-    st.subheader("🧠 SIS – Les métiers qui te correspondent")
-    top6 = scorer_metier(inp, df_metiers, top_k=6)
-    for _, r in top6.iterrows():
-        st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
-        if ft_client_id and ft_secret and postal_codes:
-            subs = search_offres(token, r["Metet"] if "Metet" in r else r["Metier"], postal_codes[0], limit=3)
-            for s in subs:
-                st.write(f"• {s['intitule']} ({s['lieuTravail']['libelle']})")
+st.subheader("🧠 SIS – Les métiers qui te correspondent")
+top6 = scorer_metier(inp, df_metiers, top_k=6)
+
+for _, r in top6.iterrows():
+    st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
+    # on collecte les offres de toutes les villes sélectionnées
+    subs_all = []
+    for cp in postal_codes:
+        subs_all += search_offres(token, r["Metier"], cp, limit=3)
+    # on déduplique par URL
+    seen2, uniq2 = set(), []
+    for o in subs_all:
+        url2 = o.get("contact",{}).get("urlPostulation") or o.get("contact",{}).get("urlOrigine","")
+        if url2 and url2 not in seen2:
+            seen2.add(url2)
+            uniq2.append(o)
+    if uniq2:
+        for o in uniq2[:3]:
+            date = o.get("dateCreation","—")[:10]
+            lien = o.get("contact",{}).get("urlPostulation") or o.get("contact",{}).get("urlOrigine","#")
+            desc = o.get("description","").replace("\n"," ")[:150] + "…"
+            st.markdown(
+                f"• **{o['intitule']}**  \n"
+                f"  _Publié le {date}_  \n"
+                f"  {desc}  \n"
+                f"  [Voir / Postuler]({lien})"
+            )
+    else:
+        st.info("  • Aucune offre trouvée pour ce métier dans les villes sélectionnées.")
