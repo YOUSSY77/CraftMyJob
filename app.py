@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
-# ── 0) Supprimer les vars de proxy hérités
+# ── 0) Supprimer les vars de proxy héritées
 for v in ("HTTP_PROXY","http_proxy","HTTPS_PROXY","https_proxy"):
     os.environ.pop(v, None)
 
@@ -157,7 +157,8 @@ if typed:
         raw_suggestions = []
 # on garde l’historique + nouveautés
 options = list(dict.fromkeys(st.session_state.locations + raw_suggestions))
-st.session_state.locations = st.multiselect(
+# MULTISELECT qui met à jour session_state.locations automatiquement
+locations = st.multiselect(
     "Sélectionnez une ou plusieurs villes",
     options=options,
     default=st.session_state.locations,
@@ -165,7 +166,7 @@ st.session_state.locations = st.multiselect(
 )
 # CP extraits
 postal_codes = []
-for loc in st.session_state.locations:
+for loc in locations:
     m = re.search(r"\((\d{5})\)", loc)
     if m:
         postal_codes.append(m.group(1))
@@ -219,7 +220,7 @@ if st.button("🚀 Lancer tout"):
         "missions":         missions,
         "values":           values,
         "skills":           skills,
-        "locations":        st.session_state.locations,
+        "locations":        locations,
         "experience_level": experience_level,
         "contract_type":    contract_type,
         "remote":           remote
@@ -284,4 +285,5 @@ if st.button("🚀 Lancer tout"):
                 )
         else:
             st.info("• Aucune offre trouvée pour ce métier dans tes villes.")
+
 
