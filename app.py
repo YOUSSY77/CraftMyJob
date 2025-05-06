@@ -14,8 +14,15 @@ import pandas as pd
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 
-# ── Initialisation session_state pour la sélection des villes
+# ── Stop-words FR pour filtrer les mots-clés
+FRENCH_STOP_WORDS = {
+    "et","ou","la","le","les","de","des","du","un","une",
+    "à","en","pour","par","avec","sans","sur","dans","au","aux"
+}
+
+# ── 0b) Session-state pour la sélection des villes
 if "locations" not in st.session_state:
     st.session_state.locations = []
 
@@ -27,14 +34,13 @@ st.set_page_config(
 st.title("✨ CraftMyJob")
 st.caption("by Job Seekers Hub France 🇫🇷")
 
-# ── Chargement référentiel métiers
+# ── 1) Chargement référentiel métiers
 @st.cache_data
 def load_metiers() -> pd.DataFrame:
     return pd.read_csv("referentiel_metiers_craftmyjob_final.csv", dtype=str)
-
 df_metiers = load_metiers()
 
-# ── Construction TF-IDF pour SIS
+# ── 2) Construction TF-IDF pour SIS
 @st.cache_data
 def build_tfidf(df: pd.DataFrame):
     corpus = (
@@ -45,11 +51,9 @@ def build_tfidf(df: pd.DataFrame):
     vect = TfidfVectorizer(max_features=2000)
     X_ref = vect.fit_transform(corpus)
     return vect, X_ref
-
 vect, X_ref = build_tfidf(df_metiers)
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
+# ── 3) Helpers OpenAI & PDF
 def get_gpt_response(prompt: str, api_key: str) -> str:
     url = "https://api.openai.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -79,6 +83,7 @@ class PDFGen:
         buf.seek(0)
         return buf
 
+# ── 4) Auth Pôle-Emploi
 def fetch_ft_token(cid: str, sec: str) -> str:
     auth_url = "https://entreprise.pole-emploi.fr/connexion/oauth2/access_token?realm=/partenaire"
     data = {
@@ -91,10 +96,30 @@ def fetch_ft_token(cid: str, sec: str) -> str:
     r.raise_for_status()
     return r.json()["access_token"]
 
+# ── 5) Extraction et filtrage des mots-clés
+def build_keywords(text: str, max_terms: int = 7) -> str:
+    words = re.findall(r"\w{2,}", text.lower(), flags=re.UNICODE)
+    seen = set()
+    keys = []
+    for w in words:
+        if w in seen or w in ENGLISH_STOP_WORDS or w in FRENCH_STOP_WORDS:
+            continue
+        seen.add(w)
+        keys.append(w)
+        if len(keys) >= max_terms:
+            break
+    return ",".join(keys)
+
+# ── 6) Recherche d’offres Pôle-Emploi corrigée
 def search_offres(token: str, mots: str, loc: str, limit: int = 5) -> list:
-    url = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
+    url = "https://api.francetravail.io/api/offres/v2/offres/search"
     headers = {"Authorization": f"Bearer {token}"}
-    params  = {"motsCles": mots, "localisation": loc, "range": f"0-{limit-1}"}
+    mots_param = build_keywords(mots)
+    params = {
+        "motsCles":     mots_param,
+        "localisation": loc,
+        "range":        f"0-{limit-1}"
+    }
     r = requests.get(url, headers=headers, params=params, timeout=10)
     if r.status_code == 204:
         return []
@@ -103,6 +128,7 @@ def search_offres(token: str, mots: str, loc: str, limit: int = 5) -> list:
         return []
     return r.json().get("resultats", [])
 
+# ── 7) Scoring métieRme
 def scorer_metier(inp: dict, df: pd.DataFrame, top_k: int = 6) -> pd.DataFrame:
     user_doc = " ".join([inp["missions"], inp["skills"], inp["job_title"]])
     v_user   = vect.transform([user_doc])
@@ -111,42 +137,8 @@ def scorer_metier(inp: dict, df: pd.DataFrame, top_k: int = 6) -> pd.DataFrame:
     df2["score"] = (cosines * 100).round(1)
     return df2.nlargest(top_k, "score")
 
-def make_mots_cles(*texts: str) -> str:
-    """
-    Extrait jusqu'à 7 mots-clés (>=2 lettres) en filtrant quelques stopwords,
-    séparés par des virgules.
-    """
-    combined = " ".join(texts)
-    mots = re.findall(r"\w{2,}", combined, flags=re.UNICODE)
-    stop = {"et","le","la","les","de","des","du","en","un","une",
-            "à","pour","avec","sur","dans","au","aux","par"}
-    vus, clés = set(), []
-    for m in mots:
-        lm = m.lower()
-        if lm in stop or lm in vus:
-            continue
-        vus.add(lm)
-        clés.append(lm)
-        if len(clés) >= 7:
-            break
-    return ",".join(clés)
-
-# ── Autocomplétion via Geo API du Gouvernement ────────────────────────────────────
-
-def search_communes(query: str, limit: int = 10) -> list[str]:
-    url = "https://geo.api.gouv.fr/communes"
-    params = {"nom": query, "fields": "nom,codesPostaux", "boost": "population", "limit": limit}
-    r = requests.get(url, params=params, timeout=5)
-    r.raise_for_status()
-    résultats = []
-    for c in r.json():
-        cp = c["codesPostaux"][0] if c["codesPostaux"] else "00000"
-        résultats.append(f"{c['nom']} ({cp})")
-    return résultats
-
-# ── 1️⃣ Que souhaites-tu faire dans la vie ? ─────────────────────────────────────
-
-st.header("1️⃣ Que souhaites-tu faire dans la vie ?")
+# ── 8) UI : formulaire profil
+st.header("1️⃣ Décris ton projet professionnel")
 uploaded_cv = st.file_uploader("📂 Optionnel : ton CV", type=["pdf","docx","txt"])
 cv_text = ""
 if uploaded_cv:
@@ -163,24 +155,23 @@ missions  = st.text_area("📋 Missions principales")
 values    = st.text_area("🏢 Valeurs (facultatif)")
 skills    = st.text_area("🧠 Compétences clés")
 
-# ── Autocomplete multi-villes
+# ── 9) UI : autocomplete multi-villes
+def search_communes(query: str, limit: int = 10) -> list[str]:
+    url = "https://geo.api.gouv.fr/communes"
+    params = {"nom": query, "fields": "nom,codesPostaux", "boost": "population", "limit": limit}
+    r = requests.get(url, params=params, timeout=5)
+    r.raise_for_status()
+    out = []
+    for c in r.json():
+        cp = c["codesPostaux"][0] if c["codesPostaux"] else "00000"
+        out.append(f"{c['nom']} ({cp})")
+    return out
 
-typed = st.text_input("📍 Commencez à taper une ville…")
-raw     = []
-if typed:
-    try:
-        raw = search_communes(typed)
-    except:
-        raw = []
+typed = st.text_input("📍 Commence à taper une ville…")
+raw = search_communes(typed) if typed else []
 options = list(dict.fromkeys(st.session_state.locations + raw))
-selections = st.multiselect(
-    "Sélectionnez une ou plusieurs villes",
-    options=options,
-    default=st.session_state.locations
-)
+selections = st.multiselect("Sélectionne tes villes", options, default=st.session_state.locations)
 st.session_state.locations = selections
-
-# ── Extraction des codes postaux
 
 postal_codes = []
 for loc in st.session_state.locations:
@@ -192,15 +183,13 @@ experience_level = st.radio("🎯 Niveau d'expérience", ["Débutant(e)","Expér
 contract_type    = st.selectbox("📄 Type de contrat", ["CDI","Freelance","CDD","Stage"])
 remote           = st.checkbox("🏠 Full remote")
 
-# ── 2️⃣ Tes clés API ─────────────────────────────────────────────────────────────
-
+# ── 10) UI : clés API
 st.header("2️⃣ Tes clés API")
 openai_key   = st.text_input("🔑 OpenAI API Key", type="password")
 ft_client_id = st.text_input("🔑 Pôle-Emploi Client ID", type="password")
 ft_secret    = st.text_input("🔑 Pôle-Emploi Client Secret", type="password")
 
-# ── 3️⃣ Générations IA ───────────────────────────────────────────────────────────
-
+# ── 11) UI : choix IA
 st.header("3️⃣ Générations IA")
 templates = {
     "📄 Bio LinkedIn":        "Rédige une bio LinkedIn engageante et professionnelle.",
@@ -210,33 +199,14 @@ templates = {
 }
 choices = st.multiselect("Choisis ce que tu veux générer", list(templates), default=list(templates)[:2])
 
-def generate_prompt(label: str, inp: dict, cv: str) -> str:
-    base = (
-        f"Poste: {inp['job_title']}\n"
-        f"Missions: {inp['missions']}\n"
-        f"Compétences: {inp['skills']}\n"
-        f"Valeurs: {inp['values']}\n"
-        f"Localisation: {', '.join(inp['locations'])}\n"
-        f"Expérience: {inp['experience_level']}\n"
-        f"Contrat: {inp['contract_type']}\n"
-        f"Télétravail: {'Oui' if inp['remote'] else 'Non'}\n"
-    )
-    if cv:
-        base += f"CV extrait: {cv[:300]}...\n"
-    return base + "\n" + templates[label]
-
-# ── 4️⃣ Matching & Offres ──────────────────────────────────────────────────────
-
-st.header("4️⃣ Matching & Offres")
-
+# ── 12) ACTION : tout lancer
+st.header("4️⃣ Matching et Offres")
 if st.button("🚀 Lancer tout"):
     # validations
     if not openai_key:
-        st.error("🔑 Clé OpenAI requise")
-        st.stop()
+        st.error("🔑 Clé OpenAI requise"); st.stop()
     if not (ft_client_id and ft_secret and postal_codes):
-        st.warning("🔑 Identifiants Pôle-Emploi + au moins une ville requis")
-        st.stop()
+        st.warning("🔑 Tes identifiants Pôle-Emploi + au moins une ville sont requis"); st.stop()
 
     inp = {
         "job_title":        job_title,
@@ -252,7 +222,7 @@ if st.button("🚀 Lancer tout"):
     # — Générations IA
     for lbl in choices:
         try:
-            out = get_gpt_response(generate_prompt(lbl, inp, cv_text), openai_key)
+            out = get_gpt_response( generate_prompt(lbl, inp, cv_text), openai_key )
             st.subheader(lbl)
             st.markdown(out)
             if lbl == "🧩 CV optimisé IA":
@@ -262,9 +232,9 @@ if st.button("🚀 Lancer tout"):
         except Exception as e:
             st.error(f"❌ Erreur IA ({lbl}) : {e}")
 
-    # — Top 5 Offres pour le poste
+    # — Top 5 Offres Pôle-Emploi
     token     = fetch_ft_token(ft_client_id, ft_secret)
-    mots_cles = make_mots_cles(job_title, skills)
+    mots_cles = f"{job_title} {skills}"
     st.subheader(f"🔎 Top 5 offres pour « {job_title} »")
     offres_all = []
     for cp in postal_codes:
@@ -276,10 +246,7 @@ if st.button("🚀 Lancer tout"):
             seen.add(url); uniq.append(o)
     if uniq:
         for o in uniq[:5]:
-            st.markdown(
-                f"**{o['intitule']}** – {o['lieuTravail']['libelle']}  \n"
-                f"[Voir / Postuler]({o['contact']['urlOrigine']})\n---"
-            )
+            st.markdown(f"**{o['intitule']}** – {o['lieuTravail']['libelle']}  \n[Voir / Postuler]({o['contact']['urlOrigine']})\n---")
     else:
         st.info("🔍 Aucune offre trouvée pour ce poste.")
 
@@ -288,14 +255,11 @@ if st.button("🚀 Lancer tout"):
     top6 = scorer_metier(inp, df_metiers, top_k=6)
     for _, r in top6.iterrows():
         st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
-        mots_metier = make_mots_cles(r["Metier"])
-        subs_all = []
+        subs_all, seen2, uniq2 = [], set(), []
         for cp in postal_codes:
-            subs_all += search_offres(token, mots_metier, cp, limit=3)
-        seen2, uniq2 = set(), []
+            subs_all += search_offres(token, r["Metier"], cp, limit=3)
         for o in subs_all:
-            url2 = (o.get("contact",{}).get("urlPostulation")
-                    or o.get("contact",{}).get("urlOrigine",""))
+            url2 = o.get("contact",{}).get("urlPostulation") or o.get("contact",{}).get("urlOrigine","")
             if url2 and url2 not in seen2:
                 seen2.add(url2); uniq2.append(o)
         if uniq2:
@@ -311,6 +275,3 @@ if st.button("🚀 Lancer tout"):
                 )
         else:
             st.info("• Aucune offre trouvée pour ce métier dans tes villes.")
-
-
-
