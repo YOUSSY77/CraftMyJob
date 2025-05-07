@@ -185,45 +185,41 @@ if "locations" not in st.session_state:
 
 # ── 5) FORM PROFILE
 st.header("1️⃣ Que souhaites-tu faire dans la vie ?")
-uploaded_cv = st.file_uploader("📂 Optionnel : ton CV", type=["pdf","docx","txt"])
-cv_text = ""
-if uploaded_cv:
-    ext = uploaded_cv.name.rsplit(".",1)[-1].lower()
-    if ext=="pdf":
-        cv_text = " ".join(p.extract_text() or "" for p in PdfReader(uploaded_cv).pages)
-    elif ext=="docx":
-        cv_text = " ".join(p.text for p in Document(uploaded_cv).paragraphs)
-    else:
-        cv_text = uploaded_cv.read().decode()
-
-job_title = st.text_input("🔤 Poste recherché")
-missions  = st.text_area("📋 Missions principales")
-skills    = st.text_area("🧠 Compétences clés")
+# ... votre code pour CV / job_title / missions / skills ...
 
 typed = st.text_input("📍 Commencez à taper ville, département ou région…")
-raw    = search_territoires(typed) if typed else []
-opts   = list(dict.fromkeys(st.session_state.locations + raw))
-st.session_state.locations = st.multiselect(
-    "Sélectionnez vos territoires", opts,
-    default=st.session_state.locations, key="locations"
+raw   = search_territoires(typed) if typed else []
+opts  = list(dict.fromkeys(st.session_state.locations + raw))
+
+# Affichage du multiselect **sans** double écriture dans session_state
+locations = st.multiselect(
+    "Sélectionnez vos territoires",
+    options=opts,
+    default=st.session_state.locations,
+    help="Vous pouvez ajouter plusieurs communes, départements (ex : « 75 ») ou régions."
 )
 
-# transformer en codes FT
+# On synchronise ensuite si besoin
+st.session_state.locations = locations
+
+# Puis on extrait les codes pour la recherche FT
 territoires = []
-for loc in st.session_state.locations:
-    if m:=re.search(r"\((\d{5})\)", loc):
+for loc in locations:
+    if m := re.search(r"\((\d{5})\)", loc):
         territoires.append(m.group(1))
-    elif m:=re.match(r"Départment (\d{2})", loc):
+    elif m := re.match(r"Départment (\d{2})", loc):
         territoires.append(m.group(1))
-    elif m:=re.search(r"\(region:(\d+)\)", loc):
+    elif m := re.search(r"\(region:(\d+)\)", loc):
         code_rg = m.group(1)
+        # appel geo.api.gouv.fr pour récupérer les codes des départements de la région
         rdeps = requests.get(
             f"https://geo.api.gouv.fr/regions/{code_rg}/departements",
             params={"fields":"code"}, timeout=5
         )
-        if rdeps.status_code==200:
+        if rdeps.status_code == 200:
             for d in rdeps.json():
                 territoires.append(d["code"])
+
 
 experience_level = st.radio("🎯 Niveau d'expérience",
                             ["Débutant(e) (0-2 ans)",
