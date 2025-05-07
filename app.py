@@ -21,7 +21,7 @@ from rapidfuzz import fuzz
 st.set_page_config(page_title="CraftMyJob – by Job Seekers Hub France", layout="centered")
 # logo (mettre logo_jobseekers.png à la racine)
 try:
-    logo = Image.open("logo_jobseekers.png")
+    logo = Image.open("logo_jobseekers.PNG")
     st.image(logo, width=120)
 except:
     pass
