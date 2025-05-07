@@ -35,7 +35,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("✨ CraftMyJob")
+st.title("CraftMyJob")
 st.markdown("""
 <h2 class="section-header">🧠 SIS – Smart Job Suggestion</h2>
 <p>Notre module <strong>SIS</strong> analyse votre profil et vos zones géographiques pour vous proposer métiers & offres ciblés.</p>
