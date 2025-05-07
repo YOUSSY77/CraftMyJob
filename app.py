@@ -38,8 +38,7 @@ st.markdown("""
 st.title("✨ CraftMyJob")
 st.markdown("""
 <h2 class="section-header">🧠 SIS – Smart Job Suggestion</h2>
-<p>Notre module <strong>SIS</strong> analyse votre profil et vos zones géographiques 
-pour vous proposer métiers & offres ciblés.</p>
+<p>Notre module <strong>SIS</strong> analyse votre profil et vos zones géographiques pour vous proposer métiers & offres ciblés.</p>
 """, unsafe_allow_html=True)
 
 # ── 2) LOAD MÉTIERS & TF-IDF
@@ -56,7 +55,8 @@ def build_tfidf(df: pd.DataFrame):
         df["Competences"].fillna("") + " " +
         df["Metier"].fillna("")
     ).tolist()
-    vect = TfidfVectorizer(max_features=2000, stop_words="french")
+    # suppression de stop_words="french" → vecteur de base
+    vect = TfidfVectorizer(max_features=2000)
     X = vect.fit_transform(corpus)
     return vect, X
 
@@ -127,56 +127,59 @@ def search_offres(token: str, mots: str, loc: str, limit: int=5) -> list:
     r = requests.get(url, headers=headers, params=params, timeout=10)
     if r.status_code == 204:
         return []
-    if r.status_code not in (200, 206):
+    if r.status_code not in (200,206):
         st.error(f"FT API {r.status_code} : {r.text}")
         return []
     return r.json().get("resultats", [])
 
 def scorer_metier(inp: dict, df: pd.DataFrame, top_k: int=6) -> pd.DataFrame:
-    # cosinus
     doc = " ".join([inp["missions"], inp["skills"], inp["job_title"]])
     v_user = vect.transform([doc])
     cos = cosine_similarity(v_user, X_ref).flatten()
     df2 = df.copy()
     df2["cosine"] = cos
-    # fuzzy
-    df2["fz_t"] = df2["Metier"].apply(lambda m: fuzz.token_set_ratio(m, inp["job_title"]) / 100)
-    df2["fz_m"] = df2["Activites"].apply(lambda a: fuzz.token_set_ratio(a, inp["missions"]) / 100)
-    df2["fz_c"] = df2["Competences"].apply(lambda c: fuzz.token_set_ratio(c, inp["skills"]) / 100)
+    df2["fz_t"] = df2["Metier"].apply(lambda m: fuzz.token_set_ratio(m, inp["job_title"])/100)
+    df2["fz_m"] = df2["Activites"].apply(lambda a: fuzz.token_set_ratio(a, inp["missions"])/100)
+    df2["fz_c"] = df2["Competences"].apply(lambda c: fuzz.token_set_ratio(c, inp["skills"])/100)
     df2["score"] = (0.5*df2["cosine"] + 0.2*df2["fz_t"]
                     + 0.15*df2["fz_m"] + 0.15*df2["fz_c"]) * 100
     return df2.nlargest(top_k, "score")
 
-# ── 4) AUTOCOMPLÉTION VILLES / DÉPARTEMENTS / RÉGIONS
+# ── 4) AUTOCOMPLÉTION TERRITOIRES
 def search_territoires(query: str, limit: int=10) -> list[str]:
     out = []
-    # département INSEE 2 chiffres
+    # département
     if re.fullmatch(r"\d{2}", query):
-        url = f"https://geo.api.gouv.fr/departements/{query}/communes"
-        params = {"fields":"nom,codesPostaux","boost":"population","limit":limit}
-        r = requests.get(url, params=params, timeout=5); r.raise_for_status()
+        r = requests.get(
+            f"https://geo.api.gouv.fr/departements/{query}/communes",
+            params={"fields":"nom,codesPostaux","boost":"population","limit":limit},
+            timeout=5
+        )
+        r.raise_for_status()
         for c in r.json():
             cp = c["codesPostaux"][0] if c["codesPostaux"] else "00000"
             out.append(f"{c['nom']} ({cp})")
         out.append(f"Départment {query}")
     else:
         # communes
-        url = "https://geo.api.gouv.fr/communes"
-        params = {"nom":query,"fields":"nom,codesPostaux","boost":"population","limit":limit}
-        r = requests.get(url, params=params, timeout=5); r.raise_for_status()
-        for c in r.json():
+        r1 = requests.get(
+            "https://geo.api.gouv.fr/communes",
+            params={"nom":query,"fields":"nom,codesPostaux","boost":"population","limit":limit},
+            timeout=5
+        ); r1.raise_for_status()
+        for c in r1.json():
             cp = c["codesPostaux"][0] if c["codesPostaux"] else "00000"
             out.append(f"{c['nom']} ({cp})")
         # régions
-        url2 = "https://geo.api.gouv.fr/regions"
-        params2 = {"nom":query,"fields":"nom,code"}
-        r2 = requests.get(url2, params=params2, timeout=5)
+        r2 = requests.get(
+            "https://geo.api.gouv.fr/regions",
+            params={"nom":query,"fields":"nom,code"}, timeout=5
+        )
         if r2.status_code == 200:
             for rg in r2.json():
                 out.append(f"{rg['nom']} (region:{rg['code']})")
     return list(dict.fromkeys(out))
 
-# session_state pour multi-séléction
 if "locations" not in st.session_state:
     st.session_state.locations = []
 
@@ -186,9 +189,9 @@ uploaded_cv = st.file_uploader("📂 Optionnel : ton CV", type=["pdf","docx","tx
 cv_text = ""
 if uploaded_cv:
     ext = uploaded_cv.name.rsplit(".",1)[-1].lower()
-    if ext == "pdf":
+    if ext=="pdf":
         cv_text = " ".join(p.extract_text() or "" for p in PdfReader(uploaded_cv).pages)
-    elif ext == "docx":
+    elif ext=="docx":
         cv_text = " ".join(p.text for p in Document(uploaded_cv).paragraphs)
     else:
         cv_text = uploaded_cv.read().decode()
@@ -197,38 +200,30 @@ job_title = st.text_input("🔤 Poste recherché")
 missions  = st.text_area("📋 Missions principales")
 skills    = st.text_area("🧠 Compétences clés")
 
-typed = st.text_input("📍 Commencez à taper une ville, département ou région…")
-raw = search_territoires(typed) if typed else []
-options = list(dict.fromkeys(st.session_state.locations + raw))
+typed = st.text_input("📍 Commencez à taper ville, département ou région…")
+raw    = search_territoires(typed) if typed else []
+opts   = list(dict.fromkeys(st.session_state.locations + raw))
 st.session_state.locations = st.multiselect(
-    "Sélectionnez vos territoires", options,
+    "Sélectionnez vos territoires", opts,
     default=st.session_state.locations, key="locations"
 )
 
-# Construire la liste de codes à passer à FT
+# transformer en codes FT
 territoires = []
 for loc in st.session_state.locations:
-    # CP
-    m = re.search(r"\((\d{5})\)", loc)
-    if m:
+    if m:=re.search(r"\((\d{5})\)", loc):
         territoires.append(m.group(1))
-        continue
-    # département
-    m2 = re.search(r"^Départment (\d{2})", loc)
-    if m2:
-        territoires.append(m2.group(1))
-        continue
-    # région
-    m3 = re.search(r"\(region:(\d+)\)", loc)
-    if m3:
-        code_rg = m3.group(1)
-        # récupérer tous les départements de la région
-        r = requests.get(f"https://geo.api.gouv.fr/regions/{code_rg}/departements",
-                         params={"fields":"code"}, timeout=5)
-        if r.status_code == 200:
-            for dep in r.json():
-                territoires.append(dep["code"])
-        continue
+    elif m:=re.match(r"Départment (\d{2})", loc):
+        territoires.append(m.group(1))
+    elif m:=re.search(r"\(region:(\d+)\)", loc):
+        code_rg = m.group(1)
+        rdeps = requests.get(
+            f"https://geo.api.gouv.fr/regions/{code_rg}/departements",
+            params={"fields":"code"}, timeout=5
+        )
+        if rdeps.status_code==200:
+            for d in rdeps.json():
+                territoires.append(d["code"])
 
 experience_level = st.radio("🎯 Niveau d'expérience",
                             ["Débutant(e) (0-2 ans)",
@@ -267,29 +262,25 @@ def generate_prompt(lbl: str, inp: dict, cv: str) -> str:
         base += f"CV extrait: {cv[:300]}...\n"
     return base + "\n" + templates[lbl]
 
-# ── 7) ACTION SUR BOUTON
+# ── 7) ACTION
 if st.button("🚀 Lancer tout"):
-    # validations
     if not openai_key:
         st.error("🔑 Clé OpenAI requise"); st.stop()
     if not (ft_client_id and ft_secret and territoires):
-        st.error("🔑 Identifiants Pôle-Emploi + au moins un territoire requis"); st.stop()
+        st.error("🔑 Identifiants Pôle-Emploi + un territoire requis"); st.stop()
 
-    inputs = {
-        "job_title": job_title,
-        "missions":  missions,
-        "skills":    skills,
-        "experience_level": experience_level,
-        "contract_type":    contract_type,
-        "remote":           remote
+    inp = {
+        "job_title":job_title, "missions":missions, "skills":skills,
+        "experience_level":experience_level,
+        "contract_type":contract_type, "remote":remote
     }
 
-    # — IA
+    # — Générations IA
     for lbl in choices:
         try:
-            out = get_gpt_response(generate_prompt(lbl, inputs, cv_text), openai_key)
+            out = get_gpt_response(generate_prompt(lbl, inp, cv_text), openai_key)
             st.subheader(lbl); st.markdown(out)
-            if lbl == "🧩 CV optimisé IA":
+            if lbl=="🧩 CV optimisé IA":
                 pdf = PDFGen.to_pdf(out)
                 st.download_button("📥 Télécharger PDF",
                                    data=pdf,
@@ -298,13 +289,13 @@ if st.button("🚀 Lancer tout"):
         except Exception as e:
             st.error(f"❌ Erreur IA ({lbl}) : {e}")
 
-    # — FT : Top 5 Offres pour le poste
-    token  = fetch_ft_token(ft_client_id, ft_secret)
-    mots   = build_keywords([job_title, skills])
+    # — Top 5 Offres pour le poste
+    token = fetch_ft_token(ft_client_id, ft_secret)
+    mots  = build_keywords([job_title, skills])
     st.header(f"4️⃣ Top 5 offres pour « {job_title} »")
     all_of = []
-    for terr in territoires:
-        all_of += search_offres(token, mots, terr, limit=5)
+    for t in territoires:
+        all_of += search_offres(token, mots, t, limit=5)
     seen, uniq = set(), []
     for o in all_of:
         url = o.get("contact",{}).get("urlOrigine","")
@@ -312,32 +303,28 @@ if st.button("🚀 Lancer tout"):
             seen.add(url); uniq.append(o)
     if uniq:
         for o in uniq[:5]:
-            st.markdown(f"**{o['intitule']}** – {o['lieuTravail']['libelle']}  \n"
-                        f"[Voir]({o['contact']['urlOrigine']})\n---")
+            st.markdown(f"**{o['intitule']}** – {o['lieuTravail']['libelle']}  \n[Voir]({o['contact']['urlOrigine']})\n---")
     else:
         st.info("🔍 Aucune offre trouvée pour ce poste.")
 
-    # — SIS : Top 6 Métiers + offres par métier
+    # — SIS : Top 6 Métiers + offres
     st.header("5️⃣ SIS – Les métiers qui te correspondent")
-    top6 = scorer_metier(inputs, df_metiers, top_k=6)
+    top6 = scorer_metier(inp, df_metiers, top_k=6)
     for _, r in top6.iterrows():
         st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
-        # pour chaque métier, top 3 offres filtrées géo
-        mots_m = build_keywords([r["Metier"]])
+        mkeys = build_keywords([r["Metier"]])
         subs = []
-        for terr in territoires:
-            subs += search_offres(token, mots_m, terr, limit=3)
+        for t in territoires:
+            subs += search_offres(token, mkeys, t, limit=3)
         seen2, uniq2 = set(), []
         for o in subs:
-            link = (o.get("contact",{}).get("urlPostulation")
-                    or o.get("contact",{}).get("urlOrigine",""))
+            link = o.get("contact",{}).get("urlPostulation") or o.get("contact",{}).get("urlOrigine","")
             if link and link not in seen2:
                 seen2.add(link); uniq2.append(o)
         if uniq2:
             for o in uniq2[:3]:
                 dt   = o.get("dateCreation","—")[:10]
-                lien = (o.get("contact",{}).get("urlPostulation")
-                        or o.get("contact",{}).get("urlOrigine","#"))
+                lien = o.get("contact",{}).get("urlPostulation") or o.get("contact",{}).get("urlOrigine","#")
                 desc = (o.get("description","") or "").replace("\n"," ")[:150] + "…"
                 st.markdown(
                     f"• **{o['intitule']}**  \n"
@@ -347,3 +334,4 @@ if st.button("🚀 Lancer tout"):
                 )
         else:
             st.info("• Aucune offre trouvée pour ce métier dans vos territoires.")
+
