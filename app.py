@@ -1,4 +1,3 @@
-```python
 # -*- coding: utf-8 -*-
 import os
 # ── 0) Supprimer les vars de proxy hérités
@@ -207,5 +206,5 @@ if st.button("🚀 Lancer tout"):
     top6 = scorer_metier(inp, df_metiers)
     for _, r in top6.iterrows():
         st.markdown(f"**{r['Metier']}** — {int(r['score'])}%")
-```
+
 
