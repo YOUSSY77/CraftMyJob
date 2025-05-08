@@ -195,10 +195,10 @@ if st.button("🚀 Lancer"):
             if name=="CV optimisé IA": buf=PDFGen.to_pdf(out); st.download_button("📥 Télécharger CV optimisé",data=buf,file_name="CV_optimisé.pdf",mime="application/pdf")
         except Exception as e: st.error(f"Erreur IA {name}: {e}")
 
-    # Token
-    token=fetch_ftoken(key_pe_id,key_pe_secret)
+        # Token
+    token = fetch_ftoken(key_pe_id, key_pe_secret)
 
-            # Top offres
+    # Top offres
     st.header(f"4️⃣ Top offres pour '{job_title}'")
     kw = build_keywords([job_title, skills])
     all_of = []
@@ -218,13 +218,13 @@ if st.button("🚀 Lancer"):
         for url, o in list(uniq.items())[:5]:
             lib = o.get('lieuTravail', {}).get('libelle', '')
             title = o.get('intitule', '–')
-            markup = (
-                f"**{title}** – {lib}  
-"
-                f"<span class='offer-link'><a href='{url}' target='_blank'>Voir</a></span>
-"
-                "---"
-            )
+            # format markdown safely
+            lines = []
+            lines.append(f"**{title}** – {lib}")
+            lines.append(f"<span class='offer-link'><a href='{url}' target='_blank'>Voir</a></span>")
+            lines.append("---")
+            markup = "  
+".join(lines)
             st.markdown(markup, unsafe_allow_html=True)
     else:
         st.info("Aucune offre trouvée...")
