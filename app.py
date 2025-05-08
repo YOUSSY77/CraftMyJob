@@ -70,30 +70,39 @@ def normalize_location(loc: str) -> str:
     return loc
 
 
-def search_territoires(query: str, limit: int = 10) -> list:
-    """Autocomplete communes, départements, régions via geo.api.gouv.fr."""
+def search_territoires(query: str, limit: int = 10) -> list[str]:
     res = []
+    # 1) si l'utilisateur tape un code à 2 chiffres, on prend toutes les communes
     if re.fullmatch(r"\d{2}", query):
-        r = requests.get(f"https://geo.api.gouv.fr/departements/{query}/communes",
-                         params={"fields":"nom,codesPostaux","limit":limit}, timeout=5)
-        r.raise_for_status()
-        for e in r.json():
-            cp = e["codesPostaux"][0] if e["codesPostaux"] else "00000"
-            res.append(f"{e['nom']} ({cp})")
-        res.append(f"Departement {query}")
-    else:
-        r1 = requests.get("https://geo.api.gouv.fr/communes",
-                          params={"nom":query,"fields":"nom,codesPostaux","limit":limit}, timeout=5)
-        if r1.status_code == 200:
-            for e in r1.json():
-                cp = e["codesPostaux"][0] if e["codesPostaux"] else "00000"
-                res.append(f"{e['nom']} ({cp})")
-        r2 = requests.get("https://geo.api.gouv.fr/regions",
-                          params={"nom":query,"fields":"nom,code"}, timeout=5)
-        if r2.status_code == 200:
-            for rg in r2.json():
-                res.append(f"{rg['nom']} (region:{rg['code']})")
-    return list(dict.fromkeys(res))
+        # … comme avant …
+        return res
+
+    # 2) sinon, on regarde si c'est un nom de département
+    r_dep = requests.get(
+        "https://geo.api.gouv.fr/departements",
+        params={"nom": query, "fields": "code,nom"}, timeout=5
+    )
+    if r_dep.status_code == 200 and r_dep.json():
+        # on prend le 1er département retourné
+        dep = r_dep.json()[0]
+        code = dep["code"]
+        # on liste les communes du département
+        r_com = requests.get(
+            f"https://geo.api.gouv.fr/departements/{code}/communes",
+            params={"fields": "nom,codesPostaux", "limit": limit}, timeout=5
+        )
+        r_com.raise_for_status()
+        for c in r_com.json():
+            cp = c["codesPostaux"][0] if c["codesPostaux"] else "00000"
+            res.append(f"{c['nom']} ({cp})")
+        # on ajoute la mention Départment XX pour pouvoir repérer le filtre
+        res.append(f"Départment {code}")
+        return list(dict.fromkeys(res))
+
+    # 3) sinon on cherche en mode commune
+    # … ton code actuel pour communes + régions …
+    # renvoyer enfin list(dict.fromkeys(res))
+
 
 
 def build_keywords(texts: list[str], max_terms: int = 7) -> str:
@@ -264,22 +273,25 @@ if st.button("🚀 Lancer"):
     else:
         st.info("Aucune offre trouvée pour ce poste dans vos territoires.")
 
-    # — SIS : Top 6 Métiers + offres
-    st.header("5️⃣ SIS – Métiers recommandés")
-    # on appelle la bonne fonction
-    top6 = scorer_metier(profile, referentiel, top_k=6)
-    for _, r in top6.iterrows():
-        st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
-        kws = build_keywords([r['Metier']])
-        subs = []
-        for loc in sel:
-            loc_norm = normalize_location(loc)
-            tmp = search_offres(token, kws, loc_norm, limit=3)
-            subs.extend(filter_by_location(tmp, loc_norm))
-        seen = set()
+   # — SIS : métiers recommandés
+st.header("5️⃣ SIS – Métiers recommandés")
+top6 = scorer_metier(profile, referentiel, top_k=6)  # <-- bien appeler scorer_metier
+for _, r in top6.iterrows():
+    st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
+    # on reconstruit les mots-clés métier
+    kws = build_keywords([r['Metier']])
+    # on collecte et filtre les offres sur chaque territoire
+    subs = []
+    for loc in sel:
+        loc_norm = normalize_location(loc)
+        tmp = search_offres(token, kws, loc_norm, limit=3)
+        subs.extend(filter_by_location(tmp, loc_norm))
+
+    seen = set()
+    if subs:
         for o in subs:
-            link = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine','')
-            if link and link not in seen:
+            link = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
+            if link not in seen:
                 seen.add(link)
                 dt   = o.get("dateCreation","")[:10]
                 lib  = o['lieuTravail']['libelle']
@@ -290,6 +302,6 @@ if st.button("🚀 Lancer"):
                     f"<span class='offer-link'><a href='{link}' target='_blank'>Voir</a></span>",
                     unsafe_allow_html=True
                 )
-        if not seen:
-            st.info(f"Aucune offre pour « {r['Metier']} » dans vos territoires.")
-           
+    else:
+        st.info("Aucune offre trouvée pour ces métiers dans vos territoires.")
+
