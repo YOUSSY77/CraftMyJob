@@ -218,13 +218,14 @@ if st.button("🚀 Lancer"):
         for url, o in list(uniq.items())[:5]:
             lib = o.get('lieuTravail', {}).get('libelle', '')
             title = o.get('intitule', '–')
-            lines = []
+                        lines = []
             lines.append(f"**{title}** – {lib}")
             lines.append(f"<span class='offer-link'><a href='{url}' target='_blank'>Voir</a></span>")
             lines.append("---")
+            # join with markdown line breaks (two spaces + newline)
             markup = "  
 ".join(lines)
-            st.markdown(markup, unsafe_allow_html=True)
+            st.markdown(markup, unsafe_allow_html=True)(markup, unsafe_allow_html=True)
     else:
         st.info("Aucune offre trouvée...")
 
