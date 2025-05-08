@@ -182,55 +182,95 @@ tpls={"Bio LinkedIn":"Rédige une bio LinkedIn professionnelle.","Mail candidatu
 choices=st.multiselect("Générations IA",list(tpls.keys()),default=list(tpls.keys())[:2])
 
 if st.button("🚀 Lancer"):
-    if not key_openai: st.error("Clé OpenAI requise"); st.stop()
-    if not(key_pe_id and key_pe_secret and sel): st.error("Identifiants Pôle-Emploi+territoires requis"); st.stop()
-    profile={"job_title":job_title,"missions":missions,"skills":skills,"desired_skills":desired_skills}
+    # Validations
+    if not key_openai:
+        st.error("Clé OpenAI requise")
+        st.stop()
+    if not (key_pe_id and key_pe_secret and sel):
+        st.error("Identifiants Pôle-Emploi et territoires requis")
+        st.stop()
 
-    # IA
+    # Profile dict
+    profile = {
+        "job_title": job_title,
+        "missions": missions,
+        "skills": skills,
+        "desired_skills": desired_skills
+    }
+
+    # IA Generations
     st.header("🧠 Génération IA")
     for name in choices:
-        prm=(f"Poste: {job_title}\nMissions: {missions}\nCompétences: {skills}\n"+ (f"Compétences ciblées: {desired_skills}\n" if desired_skills else "")+f"Territoires: {', '.join(sel)}\nExpérience: {exp_level}\nContrat: {contract}\nTélétravail: {'Oui' if remote else 'Non'}\n\n{tpls[name]}")
-        try:
-            out=get_gpt_response(prm,key_openai); st.subheader(name); st.markdown(out)
-            if name=="CV optimisé IA": buf=PDFGen.to_pdf(out); st.download_button("📥 Télécharger CV optimisé",data=buf,file_name="CV_optimisé.pdf",mime="application/pdf")
-        except Exception as e: st.error(f"Erreur IA {name}: {e}")
+        prompt = (
+            f"Poste: {job_title}
+"
+            f"Missions: {missions}
+"
+            f"Compétences: {skills}
+"
+            + (f"Compétences ciblées: {desired_skills}
+" if desired_skills else "")
+            + f"Territoires: {', '.join(sel)}
+"
+            f"Expérience: {exp_level}
+"
+            f"Contrat: {contract}
+"
+            f"Télétravail: {'Oui' if remote else 'Non'}
 
-        # Token
+"
+            f"{tpls[name]}"
+        )
+        try:
+            result = get_gpt_response(prompt, key_openai)
+            st.subheader(name)
+            st.markdown(result)
+            if name == "CV optimisé IA":
+                pdf_buf = PDFGen.to_pdf(result)
+                st.download_button(
+                    "📥 Télécharger CV optimisé",
+                    data=pdf_buf,
+                    file_name="CV_optimisé.pdf",
+                    mime="application/pdf"
+                )
+        except Exception as e:
+            st.error(f"Erreur IA {name}: {e}")
+
+    # Fetch Pole-Emploi token
     token = fetch_ftoken(key_pe_id, key_pe_secret)
 
-            # Top offres
+    # Top offres pour le poste
     st.header(f"4️⃣ Top offres pour '{job_title}'")
-    kw = build_keywords([job_title, skills])
-    all_of = []
+    keywords = build_keywords([job_title, skills])
+    all_offres = []
     for loc in sel:
         loc_norm = normalize_location(loc)
-        offres = search_offres(token, kw, loc_norm, limit=5)
+        offres = search_offres(token, keywords, loc_norm, limit=5)
         offres = filter_by_location(offres, loc_norm)
-        all_of.extend(offres)
+        all_offres.extend(offres)
 
-    uniq = {}
-    for o in all_of:
-        url = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine', '')
-        if url and url not in uniq:
-            uniq[url] = o
+    unique_offres = {}
+    for o in all_offres:
+        link = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine', '')
+        if link and link not in unique_offres:
+            unique_offres[link] = o
 
-    if uniq:
-        for url, o in list(uniq.items())[:5]:
-            lib = o.get('lieuTravail', {}).get('libelle', '')
-            title = o.get('intitule', '–')
-            # Build markdown lines
+    if unique_offres:
+        for link, offer in list(unique_offres.items())[:5]:
+            lib = offer.get('lieuTravail', {}).get('libelle', '')
+            title = offer.get('intitule', '–')
             lines = [
                 f"**{title}** – {lib}",
-                f"<span class='offer-link'><a href='{url}' target='_blank'>Voir</a></span>",
+                f"<span class='offer-link'><a href='{link}' target='_blank'>Voir</a></span>",
                 "---"
             ]
-                        markup = "  
+            markup = "  
 ".join(lines)
             st.markdown(markup, unsafe_allow_html=True)
     else:
-        st.info("Aucune offre trouvée...")
+        st.info("Aucune offre trouvée pour ce poste dans vos territoires.")
 
-    # SIS Métiers
+# SIS Métiers
     st.header("5️⃣ SIS – Métiers recommandés")
     top6=scorer_metiers(profile,referentiel,top_k=6)
     for _,r in top6.iterrows():
