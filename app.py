@@ -224,7 +224,7 @@ if st.button("🚀 Lancer"):
                 f"<span class='offer-link'><a href='{url}' target='_blank'>Voir</a></span>",
                 "---"
             ]
-            markup = "  
+                        markup = "  
 ".join(lines)
             st.markdown(markup, unsafe_allow_html=True)
     else:
