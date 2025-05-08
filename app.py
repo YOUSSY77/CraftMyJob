@@ -198,7 +198,7 @@ if st.button("🚀 Lancer"):
         "desired_skills": desired_skills
     }
 
-        # IA Generations
+            # IA Generations
     st.header("🧠 Génération IA")
     for name in choices:
         # Build prompt lines
