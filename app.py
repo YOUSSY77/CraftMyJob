@@ -213,16 +213,15 @@ if st.button("🚀 Lancer"):
         if url and url not in uniq:
             uniq[url] = o
     if uniq:
+            if uniq:
         for url, o in list(uniq.items())[:5]:
             lib = o.get('lieuTravail', {}).get('libelle', '')
             title = o.get('intitule', '–')
-            st.markdown(
-                f"**{title}** – {lib}  
-"
-                f"<span class='offer-link'><a href='{url}' target='_blank'>Voir</a></span>
----",
-                unsafe_allow_html=True
-            )
+            markup = f"**{title}** – {lib}  
+" \
+                     f"<span class='offer-link'><a href='{url}' target='_blank'>Voir</a></span>
+---"
+            st.markdown(markup, unsafe_allow_html=True)
     else:
         st.info("Aucune offre trouvée...")
 
