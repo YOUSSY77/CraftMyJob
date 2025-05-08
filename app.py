@@ -58,7 +58,6 @@ vecteur, tfidf_matrix = build_tfidf_model(referentiel)
 # ── 3) HELPER FUNCTIONS ─────────────────────────────────────────────────
 
 def build_keywords(texts: list[str], max_terms: int = 7) -> str:
-    """Extract up to max_terms keywords from given texts."""
     combined = " ".join(texts).lower()
     tokens = re.findall(r"\w{2,}", combined, flags=re.UNICODE)
     stop_words = {"et","ou","la","le","les","de","des","du","un","une",
@@ -75,7 +74,6 @@ def build_keywords(texts: list[str], max_terms: int = 7) -> str:
 
 
 def get_gpt_response(prompt: str, api_key: str) -> str:
-    """Call OpenAI Chat Completions API."""
     url = "https://api.openai.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
@@ -93,7 +91,6 @@ def get_gpt_response(prompt: str, api_key: str) -> str:
 
 
 class PDFGen:
-    """Utility to generate PDF from text."""
     @staticmethod
     def to_pdf(text: str) -> io.BytesIO:
         buffer = io.BytesIO()
@@ -108,7 +105,6 @@ class PDFGen:
 
 
 def fetch_ftoken(client_id: str, client_secret: str) -> str:
-    """Fetch Pôle-Emploi OAuth token."""
     auth_url = (
         "https://entreprise.pole-emploi.fr/connexion/oauth2/access_token?realm=/partenaire"
     )
@@ -124,7 +120,6 @@ def fetch_ftoken(client_id: str, client_secret: str) -> str:
 
 
 def search_offres(token: str, mots: str, localisation: str, limit: int = 5) -> list:
-    """Search job offers via France Travail API."""
     url = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
     headers = {"Authorization": f"Bearer {token}"}
     params = {"motsCles": mots, "localisation": localisation, "range": f"0-{limit-1}"}
@@ -138,31 +133,24 @@ def search_offres(token: str, mots: str, localisation: str, limit: int = 5) -> l
 
 
 def scorer_metiers(profile: dict, df: pd.DataFrame, top_k: int = 6) -> pd.DataFrame:
-    """Compute similarity scores and fuzzy matches to rank métiers."""
     document = " ".join([profile["missions"], profile["skills"], profile["job_title"], profile.get("desired_skills", "")])
     vec_user = vecteur.transform([document])
     cos_scores = cosine_similarity(vec_user, tfidf_matrix).flatten()
     df_scores = df.copy()
     df_scores["cosine"] = cos_scores
-    # fuzzy matching
     df_scores["fz_title"] = df_scores["Metier"].apply(lambda m: fuzz.token_set_ratio(m, profile["job_title"]) / 100)
     df_scores["fz_missions"] = df_scores["Activites"].apply(lambda a: fuzz.token_set_ratio(a, profile["missions"]) / 100)
-    df_scores["fz_comp"]= df_scores["Competences"].apply(lambda c: fuzz.token_set_ratio(c, profile["skills"]) / 100)
-    # combined score
-    df_scores["score"] = (0.5 * df_scores["cosine"]
-                           + 0.2 * df_scores["fz_title"]
-                           + 0.15 * df_scores["fz_missions"]
-                           + 0.15 * df_scores["fz_comp"]) * 100
+    df_scores["fz_comp"] = df_scores["Competences"].apply(lambda c: fuzz.token_set_ratio(c, profile["skills"]) / 100)
+    df_scores["score"] = (0.5 * df_scores["cosine"] + 0.2 * df_scores["fz_title"] + 
+                           0.15 * df_scores["fz_missions"] + 0.15 * df_scores["fz_comp"]) * 100
     return df_scores.nlargest(top_k, "score").reset_index(drop=True)
 
 
 def search_territoires(query: str, limit: int = 10) -> list[str]:
-    """Autocomplete for communes, départements, and régions."""
     results = []
-    # département code
     if re.fullmatch(r"\d{2}", query):
         resp = requests.get(
-            f"https://geo.api.gouv.fr/departements/{query}/communes",
+            f"https://geo.api.gouv.fr/departements/{query}/communes", 
             params={"fields": "nom,codesPostaux", "limit": limit}, timeout=5
         )
         resp.raise_for_status()
@@ -171,16 +159,14 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
             results.append(f"{entry['nom']} ({cp})")
         results.append(f"Departement {query}")
     else:
-        # communes
         resp = requests.get(
-            "https://geo.api.gouv.fr/communes",
+            "https://geo.api.gouv.fr/communes", 
             params={"nom": query, "fields": "nom,codesPostaux", "limit": limit}, timeout=5
         )
         if resp.status_code == 200:
             for entry in resp.json():
                 cp = entry["codesPostaux"][0] if entry["codesPostaux"] else "00000"
                 results.append(f"{entry['nom']} ({cp})")
-        # régions
         resp2 = requests.get(
             "https://geo.api.gouv.fr/regions",
             params={"nom": query, "fields": "nom,code"}, timeout=5
@@ -190,26 +176,8 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
                 results.append(f"{rg['nom']} (region:{rg['code']})")
     return list(dict.fromkeys(results))
 
-
-def extract_codes(selections: list[str]) -> list[str]:
-    """From user selections, extract postal or department codes."""
-    codes = []
-    for s in selections:
-        if m := re.search(r"\((\d{5})\)", s):
-            codes.append(m.group(1))
-        elif m := re.match(r"Departement (\d{2})", s):
-            codes.append(m.group(1))
-        elif m := re.search(r"\(region:(\d+)\)", s):
-            rg = m.group(1)
-            rdeps = requests.get(f"https://geo.api.gouv.fr/regions/{rg}/departements", params={"fields": "code"}, timeout=5)
-            if rdeps.status_code == 200:
-                codes += [d["code"] for d in rdeps.json()]
-    return codes
-
 # ── 4) USER PROFILE FORM ─────────────────────────────────────────────────
 st.header("1️⃣ Votre profil & vos préférences")
-
-# CV upload
 uploaded_cv = st.file_uploader("📂 Optionnel : Téléchargez votre CV", type=["pdf", "docx", "txt"])
 cv_text = ""
 if uploaded_cv:
@@ -220,22 +188,19 @@ if uploaded_cv:
         cv_text = " ".join(p.text for p in Document(uploaded_cv).paragraphs)
     else:
         cv_text = uploaded_cv.read().decode(errors='ignore')
-
-# Desired job
 job_title = st.text_input("🔤 Intitulé du poste souhaité")
-missions = st.text_area("📋 Missions principales (ex : gestion de projet, recrutement, etc.)")
+missions = st.text_area("📋 Missions principales (ex : gestion de projet, recrutement, etc.")
 values = st.text_area("🏢 Valeurs (facultatif)")
 skills = st.text_area("🧠 Vos compétences clés")
 desired_skills = st.text_area("✨ Compétences métier ciblées (facultatif)")
 
-# Territories
+# Territoires
 st.markdown("""<div class='section-header'>🌍 Où voulez-vous travailler ?</div>""", unsafe_allow_html=True)
 typed = st.text_input("Commencez à taper une commune, département ou région…")
 options = search_territoires(typed) if typed else []
 default = st.session_state.get('locations', [])
 selections = st.multiselect("Sélectionnez vos territoires", options=(default + options), default=default)
 st.session_state.locations = selections
-territory_codes = extract_codes(selections)
 
 # Experience & contracts
 exp_level = st.radio("🎯 Niveau d'expérience", ["Débutant (0-2 ans)", "Expérimenté (2-5 ans)", "Senior (5+ ans)"])
@@ -251,35 +216,33 @@ pe_secret    = st.text_input("🔑 Pôle-Emploi Client Secret", type="password")
 templates = {
     "Bio LinkedIn": "Rédige une bio LinkedIn engageante et professionnelle.",
     "Mail de candidature": "Écris un mail de candidature spontanée clair et convaincant.",
-    "Mini CV": "Génère un mini-CV (5-7 lignes), souligne deux mots-clés.",
-    "CV optimisé IA": "Rédige un CV optimisé, souligne deux mots-clés."
+    "Mini CV": "Générez un mini-CV de 5-7 lignes avec deux mots-clés.",
+    "CV optimisé IA": "Rédigez un CV optimisé avec deux mots-clés.",
 }
 choices = st.multiselect("Que voulez-vous générer ?", list(templates.keys()), default=list(templates.keys())[:2])
 
 # ── 6) ACTION BUTTON ─────────────────────────────────────────────────────
 if st.button("🚀 Lancer l'analyse"):
-    # Validations
     if not openai_key:
         st.error("🔑 Merci de renseigner votre clé OpenAI.")
         st.stop()
-    if not (pe_client_id and pe_secret and territory_codes):
+    if not (pe_client_id and pe_secret and selections):
         st.error("🔑 Merci de saisir vos identifiants Pôle-Emploi et au moins un territoire.")
         st.stop()
 
-    # Build user profile
     profile = {
         "job_title": job_title,
         "missions": missions,
         "values": values,
         "skills": skills,
         "desired_skills": desired_skills,
-        "territories": territory_codes,
+        "territories": selections,
         "exp_level": exp_level,
         "contract": contract,
         "remote": remote
     }
 
-    # IA Generations
+    # Générations IA
     st.header("🧠 Résultats Génération IA")
     for name in choices:
         prompt = (
@@ -300,52 +263,3 @@ if st.button("🚀 Lancer l'analyse"):
             st.markdown(result)
             if name == "CV optimisé IA":
                 pdf_buf = PDFGen.to_pdf(result)
-                st.download_button("📥 Télécharger le CV optimisé", data=pdf_buf,
-                                   file_name="CV_optimise.pdf", mime="application/pdf")
-        except Exception as e:
-            st.error(f"Erreur IA ({name}): {e}")
-
-    # Pôle-Emploi token
-    token = fetch_ftoken(pe_client_id, pe_secret)
-
-    # Top offres pour le poste
-    st.header(f"4️⃣ Top offres pour « {profile['job_title']} »")
-    keywords_job = build_keywords([profile['job_title'], profile['skills']])
-    offers = []
-    for code in territory_codes:
-        offers.extend(search_offres(token, keywords_job, code, limit=5))
-    unique = {}
-    for o in offers:
-        url = o.get('contact', {}).get('urlOrigine', '')
-        if url and url not in unique:
-            unique[url] = o
-    if unique:
-        for o in list(unique.values())[:5]:
-            st.markdown(f"**{o['intitule']}** – {o['lieuTravail']['libelle']}  \n[Voir l'offre]({o['contact']['urlOrigine']})\n---")
-    else:
-        st.info("Aucune offre trouvée pour ce poste.")
-
-    # SIS – Suggestions métiers + offres
-    st.header("5️⃣ SIS – Métiers & offres recommandés")
-    top_metiers = scorer_metiers(profile, referentiel, top_k=6)
-    for _, row in top_metiers.iterrows():
-        st.markdown(f"**{row['Metier']}** – {int(row['score'])}%")
-        key_m = build_keywords([row['Metier']])
-        sub_offers = []
-        for code in territory_codes:
-            sub_offers.extend(search_offres(token, key_m, code, limit=3))
-        seen2, uniq2 = set(), []
-        for o in sub_offers:
-            link = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine', '')
-            if link and link not in seen2:
-                seen2.add(link)
-                uniq2.append(o)
-        if uniq2:
-            for o in uniq2[:3]:
-                date_pub = o.get('dateCreation', '—')[:10]
-                desc = (o.get('description', '') or '').replace("\n", " ")[:150] + '…'
-                st.markdown(
-                    f"• **{o['intitule']}**  \n  _Publié le {date_pub}_  \n  {desc}  \n  [Voir / Postuler]({link})"
-                )
-        else:
-            st.info(f"Aucune offre trouvée pour {row['Metier']} dans vos territoires.")
