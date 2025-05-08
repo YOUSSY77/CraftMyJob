@@ -198,22 +198,33 @@ if st.button("🚀 Lancer"):
     # Token
     token=fetch_ftoken(key_pe_id,key_pe_secret)
 
-    # Top offres
+        # Top offres
     st.header(f"4️⃣ Top offres pour '{job_title}'")
-    kw=build_keywords([job_title,skills]); all_of=[]
+    kw = build_keywords([job_title, skills])
+    all_of = []
     for loc in sel:
-        loc_norm=normalize_location(loc)
-        offres=search_offres(token,kw,loc_norm,limit=5)
-        offres=filter_by_location(offres,loc_norm)
+        loc_norm = normalize_location(loc)
+        offres = search_offres(token, kw, loc_norm, limit=5)
+        offres = filter_by_location(offres, loc_norm)
         all_of.extend(offres)
-    uniq={} 
+    uniq = {}
     for o in all_of:
-        url=o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
-        if url and url not in uniq: uniq[url]=o
+        url = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine', '')
+        if url and url not in uniq:
+            uniq[url] = o
     if uniq:
-        for url,o in list(uniq.items())[:5]: lib=o.get('lieuTravail',{}).get('libelle',''); title=o['intitule'];
-            st.markdown(f"**{title}** – {lib}  \n<span class='offer-link'><a href='{url}' target='_blank'>Voir</a></span>\n---",unsafe_allow_html=True)
-    else: st.info("Aucune offre trouvée...")
+        for url, o in list(uniq.items())[:5]:
+            lib = o.get('lieuTravail', {}).get('libelle', '')
+            title = o.get('intitule', '–')
+            st.markdown(
+                f"**{title}** – {lib}  
+"
+                f"<span class='offer-link'><a href='{url}' target='_blank'>Voir</a></span>
+---",
+                unsafe_allow_html=True
+            )
+    else:
+        st.info("Aucune offre trouvée...")
 
     # SIS Métiers
     st.header("5️⃣ SIS – Métiers recommandés")
