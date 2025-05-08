@@ -199,67 +199,10 @@ st.markdown("""<div class='section-header'>🌍 Où voulez-vous travailler ?</di
 typed = st.text_input("Commencez à taper une commune, département ou région…")
 options = search_territoires(typed) if typed else []
 default = st.session_state.get('locations', [])
-selections = st.multiselect("Sélectionnez vos territoires", options=(default + options), default=default)
-st.session_state.locations = selections
+s_elections = st.multiselect("Sélectionnez vos territoires", options=(default + options), default=default)
+st.session_state.locations = s_elections
 
 # Experience & contracts
 exp_level = st.radio("🎯 Niveau d'expérience", ["Débutant (0-2 ans)", "Expérimenté (2-5 ans)", "Senior (5+ ans)"])
 contract = st.selectbox("📄 Type de contrat", ["CDI","CDD","Freelance","Stage"])
-remote = st.checkbox("🏠 Full remote available")
-
-# ── 5) API KEYS & IA TEMPLATES ────────────────────────────────────────────
-st.header("2️⃣ Clés API & génération IA")
-openai_key   = st.text_input("🔑 Clé OpenAI API", type="password")
-pe_client_id = st.text_input("🔑 Pôle-Emploi Client ID", type="password")
-pe_secret    = st.text_input("🔑 Pôle-Emploi Client Secret", type="password")
-
-templates = {
-    "Bio LinkedIn": "Rédige une bio LinkedIn engageante et professionnelle.",
-    "Mail de candidature": "Écris un mail de candidature spontanée clair et convaincant.",
-    "Mini CV": "Générez un mini-CV de 5-7 lignes avec deux mots-clés.",
-    "CV optimisé IA": "Rédigez un CV optimisé avec deux mots-clés.",
-}
-choices = st.multiselect("Que voulez-vous générer ?", list(templates.keys()), default=list(templates.keys())[:2])
-
-# ── 6) ACTION BUTTON ─────────────────────────────────────────────────────
-if st.button("🚀 Lancer l'analyse"):
-    if not openai_key:
-        st.error("🔑 Merci de renseigner votre clé OpenAI.")
-        st.stop()
-    if not (pe_client_id and pe_secret and selections):
-        st.error("🔑 Merci de saisir vos identifiants Pôle-Emploi et au moins un territoire.")
-        st.stop()
-
-    profile = {
-        "job_title": job_title,
-        "missions": missions,
-        "values": values,
-        "skills": skills,
-        "desired_skills": desired_skills,
-        "territories": selections,
-        "exp_level": exp_level,
-        "contract": contract,
-        "remote": remote
-    }
-
-    # Générations IA
-    st.header("🧠 Résultats Génération IA")
-    for name in choices:
-        prompt = (
-            f"Poste: {profile['job_title']}\n"
-            f"Missions: {profile['missions']}\n"
-            f"Compétences: {profile['skills']}\n"
-            f"Compétences ciblées: {profile['desired_skills']}\n"
-            f"Valeurs: {profile['values']}\n"
-            f"Localités: {', '.join(selections)}\n"
-            f"Expérience: {profile['exp_level']}\n"
-            f"Contrat: {profile['contract']}\n"
-            f"Télétravail: {'Oui' if profile['remote'] else 'Non'}\n\n"
-            f"{templates[name]}"
-        )
-        try:
-            result = get_gpt_response(prompt, openai_key)
-            st.subheader(name)
-            st.markdown(result)
-            if name == "CV optimisé IA":
-                pdf_buf = PDFGen.to_pdf(result)
+remote = st.checkbox(""
