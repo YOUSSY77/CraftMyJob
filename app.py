@@ -200,27 +200,27 @@ if st.button("🚀 Lancer"):
 
     # IA Generations
     st.header("🧠 Génération IA")
+        # IA Generations
+    st.header("🧠 Génération IA")
     for name in choices:
-        prompt = (
-            f"Poste: {job_title}
-"
-            f"Missions: {missions}
-"
-            f"Compétences: {skills}
-"
-            + (f"Compétences ciblées: {desired_skills}
-" if desired_skills else "")
-            + f"Territoires: {', '.join(sel)}
-"
-            f"Expérience: {exp_level}
-"
-            f"Contrat: {contract}
-"
-            f"Télétravail: {'Oui' if remote else 'Non'}
-
-"
-            f"{tpls[name]}"
-        )
+        # Build prompt as list to avoid unterminated f-string
+        prompt_lines = [
+            f"Poste: {job_title}",
+            f"Missions: {missions}",
+            f"Compétences: {skills}"
+        ]
+        if desired_skills:
+            prompt_lines.append(f"Compétences ciblées: {desired_skills}")
+        prompt_lines.extend([
+            f"Territoires: {', '.join(sel)}",
+            f"Expérience: {exp_level}",
+            f"Contrat: {contract}",
+            f"Télétravail: {'Oui' if remote else 'Non'}",
+            "",
+            tpls[name]
+        ])
+        prompt = "
+".join(prompt_lines)
         try:
             result = get_gpt_response(prompt, key_openai)
             st.subheader(name)
