@@ -222,10 +222,11 @@ if st.button("🚀 Lancer"):
             lines = []
             lines.append(f"**{title}** – {lib}")
             lines.append(f"<span class='offer-link'><a href='{url}' target='_blank'>Voir</a></span>")
-            lines.append("---")
+                        lines.append("---")
+            # join with two spaces and a newline for markdown line breaks
             markup = "  
 ".join(lines)
-            st.markdown(markup, unsafe_allow_html=True)
+            st.markdown(markup, unsafe_allow_html=True)(markup, unsafe_allow_html=True)
     else:
         st.info("Aucune offre trouvée...")
 
