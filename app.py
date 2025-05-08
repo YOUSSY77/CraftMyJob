@@ -198,12 +198,10 @@ if st.button("🚀 Lancer"):
         "desired_skills": desired_skills
     }
 
-    # IA Generations
-    st.header("🧠 Génération IA")
         # IA Generations
     st.header("🧠 Génération IA")
     for name in choices:
-        # Build prompt as list to avoid unterminated f-string
+        # Build prompt lines
         prompt_lines = [
             f"Poste: {job_title}",
             f"Missions: {missions}",
@@ -219,6 +217,7 @@ if st.button("🚀 Lancer"):
             "",
             tpls[name]
         ])
+        # Join with newline
         prompt = "
 ".join(prompt_lines)
         try:
