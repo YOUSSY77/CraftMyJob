@@ -198,10 +198,9 @@ if st.button("🚀 Lancer"):
         "desired_skills": desired_skills
     }
 
-            # IA Generations
+    # — IA Generations
     st.header("🧠 Génération IA")
     for name in choices:
-        # Build prompt lines
         prompt_lines = [
             f"Poste: {job_title}",
             f"Missions: {missions}",
@@ -209,17 +208,16 @@ if st.button("🚀 Lancer"):
         ]
         if desired_skills:
             prompt_lines.append(f"Compétences ciblées: {desired_skills}")
-        prompt_lines.extend([
+        prompt_lines += [
             f"Territoires: {', '.join(sel)}",
             f"Expérience: {exp_level}",
             f"Contrat: {contract}",
             f"Télétravail: {'Oui' if remote else 'Non'}",
-            "",
+            "",  # ligne vide avant l’instruction
             tpls[name]
-        ])
-        # Join with newline
-        prompt = "
-".join(prompt_lines)
+        ]
+        # <-- ici on passe bien "\n".join
+        prompt = "\n".join(prompt_lines)
         try:
             result = get_gpt_response(prompt, key_openai)
             st.subheader(name)
@@ -238,7 +236,7 @@ if st.button("🚀 Lancer"):
     # Fetch Pole-Emploi token
     token = fetch_ftoken(key_pe_id, key_pe_secret)
 
-    # Top offres pour le poste
+    # — Top offres pour le poste
     st.header(f"4️⃣ Top offres pour '{job_title}'")
     keywords = build_keywords([job_title, skills])
     all_offres = []
@@ -256,27 +254,42 @@ if st.button("🚀 Lancer"):
 
     if unique_offres:
         for link, offer in list(unique_offres.items())[:5]:
-            lib = offer.get('lieuTravail', {}).get('libelle', '')
-            title = offer.get('intitule', '–')
-            lines = [
-                f"**{title}** – {lib}",
-                f"<span class='offer-link'><a href='{link}' target='_blank'>Voir</a></span>",
-                "---"
-            ]
-            markup = "  
-".join(lines)
-            st.markdown(markup, unsafe_allow_html=True)
+            lib   = offer['lieuTravail']['libelle']
+            title = offer['intitule']
+            st.markdown(
+                f"**{title}** – {lib}  \n"
+                f"<span class='offer-link'><a href='{link}' target='_blank'>Voir</a></span>\n---",
+                unsafe_allow_html=True
+            )
     else:
         st.info("Aucune offre trouvée pour ce poste dans vos territoires.")
 
-# SIS Métiers
+    # — SIS : Top 6 Métiers + offres
     st.header("5️⃣ SIS – Métiers recommandés")
-    top6=scorer_metiers(profile,referentiel,top_k=6)
-    for _,r in top6.iterrows():
-        st.markdown(f"**{r['Metier']}** – {int(r['score'])}%"); keym=build_keywords([r['Metier']]); subs=[]
-        for loc in sel: loc_norm=normalize_location(loc); tmp=search_offres(token,keym,loc_norm,limit=3); subs.extend(filter_by_location(tmp,loc_norm))
-        seen=[]; for o in subs:
-            url=o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','');
-            if url not in seen: seen.append(url); lib=o.get('lieuTravail',{}).get('libelle',''); dt=o.get('dateCreation','')[:10]; desc=(o.get('description','') or '').replace("\n"," ")[:150]+'…';
-            st.markdown(f"• **{o['intitule']}** – {lib} (_Publié {dt}_)  \n{desc}  \n<span class='offer-link'><a href='{url}' target='_blank'>Voir</a></span>",unsafe_allow_html=True)
-        if not subs: st.info(f"Aucune offre pour {r['Metier']}...")
+    # on appelle la bonne fonction
+    top6 = scorer_metier(profile, referentiel, top_k=6)
+    for _, r in top6.iterrows():
+        st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
+        kws = build_keywords([r['Metier']])
+        subs = []
+        for loc in sel:
+            loc_norm = normalize_location(loc)
+            tmp = search_offres(token, kws, loc_norm, limit=3)
+            subs.extend(filter_by_location(tmp, loc_norm))
+        seen = set()
+        for o in subs:
+            link = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine','')
+            if link and link not in seen:
+                seen.add(link)
+                dt   = o.get("dateCreation","")[:10]
+                lib  = o['lieuTravail']['libelle']
+                desc = (o.get("description","") or "").replace("\n"," ")[:150] + "…"
+                st.markdown(
+                    f"• **{o['intitule']}** – {lib} (_Publié {dt}_)  \n"
+                    f"{desc}  \n"
+                    f"<span class='offer-link'><a href='{link}' target='_blank'>Voir</a></span>",
+                    unsafe_allow_html=True
+                )
+        if not seen:
+            st.info(f"Aucune offre pour « {r['Metier']} » dans vos territoires.")
+           
