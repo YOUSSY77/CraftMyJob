@@ -229,6 +229,39 @@ tpls = {
 }
 choices = st.multiselect("Générations IA", list(tpls.keys()), default=list(tpls.keys())[:2])
 
+# — IA
+st.header("🧠 Génération IA")
+for name in choices:
+    # On récupère l’instruction de base
+    instruction = tpls[name]
+    # Si c’est la bio LinkedIn, on ajoute la consigne « pas de lieu » + max 4 lignes
+    if name == "📄 Bio LinkedIn":
+        instruction += " Ne mentionne aucune localisation (pas de 'basé à ...') et fais une bio de maximum 4 lignes."
+
+    # Construction du prompt
+    prompt = "\n".join([
+        f"Poste: {job_title}",
+        f"Missions: {missions}",
+        f"Compétences: {skills}",
+        f"Territoires: {', '.join(sel)}",
+        f"Expérience: {exp_level}",
+        f"Contrat(s): {', '.join(contract)}",
+        f"Télétravail: {'Oui' if remote else 'Non'}",
+        "",  # saut de ligne avant l’instruction
+        instruction
+    ])
+
+    # Envoi à l’API
+    try:
+        res = get_gpt_response(prompt, key_openai)
+        st.subheader(name)
+        st.markdown(res)
+        if name == "🧩 CV optimisé IA":
+            buf = PDFGen.to_pdf(res)
+            st.download_button("📥 Télécharger CV optimisé", data=buf,
+                               file_name="CV_optimisé.pdf", mime="application/pdf")
+    except Exception as e:
+        st.error(f"Erreur IA {name}: {e}")
 # ── 6) ACTION
 if st.button("🚀 Lancer tout"):
     if not key_openai:
