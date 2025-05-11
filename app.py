@@ -434,16 +434,17 @@ if st.button("🚀 Lancer tout"):
             cp = o['lieuTravail'].get('codePostal', '')
             # Construction du markdown pour l'offre
             offer_md = (
-    f"**{title}** ({typ}) – {lib} [{cp}]  
+                f"**{title}** ({typ}) – {lib} [{cp}]  
 "
-    f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>
----"
-)
-st.markdown(offer_md, unsafe_allow_html=True)(offer_md, unsafe_allow_html=True)
+                f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>  
+"
+                "---"
+            )
+            st.markdown(offer_md, unsafe_allow_html=True)
     else:
         st.info("Aucune offre trouvée pour ce poste dans vos territoires et contrats.")
 
-    # 5️⃣ SIS – Métiers recommandés
+    # 5️⃣ SIS – Métiers recommandés" – Métiers recommandés
     st.header("5️⃣ SIS – Métiers recommandés")
     top6 = scorer_metier(profile, referentiel, top_k=6)
     for _, r in top6.iterrows():
