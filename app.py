@@ -434,12 +434,12 @@ if st.button("🚀 Lancer tout"):
             cp = o['lieuTravail'].get('codePostal', '')
             # Construction du markdown pour l'offre
             offer_md = (
-                f"**{title}** ({typ}) – {lib} [{cp}]  
+    f"**{title}** ({typ}) – {lib} [{cp}]  
 "
-                f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>
+    f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>
 ---"
-            )
-            st.markdown(offer_md, unsafe_allow_html=True)
+)
+st.markdown(offer_md, unsafe_allow_html=True)(offer_md, unsafe_allow_html=True)
     else:
         st.info("Aucune offre trouvée pour ce poste dans vos territoires et contrats.")
 
