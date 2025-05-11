@@ -298,39 +298,53 @@ if st.button("🚀 Lancer tout"):
     # — Pole-Emploi token
     token = fetch_ftoken(key_pe_id, key_pe_secret)
 
-    # — Top offres pour le poste
+        # — 4️⃣ Top offres pour le poste (fuzzy‐match + fallback) ──────────────
     st.header(f"4️⃣ Top offres pour « {job_title} »")
-    keywords  = job_title
-    all_offres=[]
+    user_title = job_title.strip()
+
+    # 1) Génère jusqu'à 7 mots‐clés
+    keywords = build_keywords([user_title])
+
+    all_offres = []
     for loc in sel:
         loc_norm = normalize_location(loc)
-        offs = search_offres(token, keywords, loc_norm, limit=5)
-        offs = filter_by_location(offs, loc_norm)
-        all_offres.extend(offs)
 
-    # −− Filtrer par contrat
-    all_offres = [o for o in all_offres if o.get("typeContrat","") in contract]
+        # 2) Recherche principale (jusqu’à 10 résultats)
+        offres = search_offres(token, keywords, loc_norm, limit=10)
+        # 3) Si aucune offre, retente sur l’intitulé exact
+        if not offres:
+            offres = search_offres(token, user_title, loc_norm, limit=10)
 
-    # −− Déduplication
-    unique={}
+        # 4) Filtre fuzzy ≥60 % sur l’intitulé de l’API
+        for o in offres:
+            title = o.get("intitule", "")
+            if fuzz.token_set_ratio(title.lower(), user_title.lower()) >= 60:
+                all_offres.append(o)
+
+    # 5) Ne garde que les contrats sélectionnés
+    all_offres = [o for o in all_offres if o.get("typeContrat", "") in contract]
+
+    # 6) Déduplication et affichage (5 premières)
+    seen = {}
     for o in all_offres:
-        url = o.get("contact",{}).get("urlPostulation") or o.get("contact",{}).get("urlOrigine","")
-        if url and url not in unique:
-            unique[url] = o
+        url = o.get("contact", {}).get("urlPostulation") or o.get("contact", {}).get("urlOrigine", "")
+        if url and url not in seen:
+            seen[url] = o
 
-    if unique:
-        for url,o in list(unique.items())[:5]:
-            title = o.get("intitule","–")
+    if seen:
+        for url, o in list(seen.items())[:5]:
+            title = o.get("intitule", "–")
+            typ   = o.get("typeContrat", "–")
             lib   = o["lieuTravail"]["libelle"]
-            cp    = o["lieuTravail"]["codePostal"]
-            typ   = o.get("typeContrat","–")
+            cp    = o["lieuTravail"].get("codePostal", "")
             st.markdown(
                 f"**{title}** ({typ}) – {lib} [{cp}]  \n"
                 f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---",
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
     else:
         st.info("Aucune offre trouvée pour ce poste dans vos territoires et contrats.")
+
 
     # — SIS métiers
     st.header("5️⃣ SIS – Métiers recommandés")
