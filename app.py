@@ -429,11 +429,11 @@ if st.button("🚀 Lancer tout"):
     if seen:
         for url, o in list(seen.items())[:5]:
             st.markdown(
-                f"**{o.get('intitule', '–')}** ({o.get('typeContrat', '–')}) – "
-                f"{o['lieuTravail']['libelle']} [{o['
-            lieuTravail'].get('codePostal', '')}]  \n"
-                f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---",
-                unsafe_allow_html=True
+    f"**{o.get('intitule', '–')}** ({o.get('typeContrat', '–')}) – {o['lieuTravail']['libelle']} [{o['lieuTravail'].get('codePostal', '')}]  
+"
+    f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>
+---",
+    unsafe_allow_html=True
             )
     else:
         st.info("Aucune offre trouvée pour ce poste dans vos territoires et contrats.")
@@ -469,3 +469,4 @@ if st.button("🚀 Lancer tout"):
                     )
         else:
             st.info("Aucune offre trouvée pour ce métier dans vos territoires et contrats.")
+
