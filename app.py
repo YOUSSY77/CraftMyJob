@@ -270,7 +270,7 @@ if st.button("🚀 Lancer tout"):
     # — Pole-Emploi token
     try:
         token= fetch_ftoken(key_pe_id, key_pe_secret)
-    except requests.HTTPError as e:
+        except requests.HTTPError as e:
         status= e.response.status_code
         if status==401:
         st.error(f"Erreur Pole emploi(code{status}):{e.response.text}")st.stop()
