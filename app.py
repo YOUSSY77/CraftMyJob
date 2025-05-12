@@ -272,7 +272,7 @@ if st.button("🚀 Lancer tout"):
         token= fetch_ftoken(key_pe_id, key_pe_secret)
     except requests.HTTPError as e:
         status= e.response.status_code
-        ifstatus==401:
+        if status==401:
         st.error(f"Erreur Pole emploi(code{status}):{e.response.text}")st.stop()
 
     # — Top offres pour le poste
