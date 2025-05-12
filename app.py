@@ -206,14 +206,14 @@ default= st.session_state.get("locations",[])
 sel = st.multiselect("Sélectionnez vos territoires", options=(default+opts), default=default)
 st.session_state.locations = sel
 
-exp_level = st.radio("🎯 Expérience", ["Débutant (0-2 ans)","Expérimenté (2-5 ans)","Senior (5+ ans)"])
+exp_level = st.radio("🎯 Expérience", ["Débutant (0-3 ans)","Expérimenté (3-7 ans)","Senior (7+ ans)"])
 # ── **MULTISELECT** pour le(s) contrat(s)
 contract = st.multiselect(
     "📄 Types de contrat",
     options=["CDI","CDD","Freelance","Stage","Alternance"],
     default=["CDI","CDD","Freelance"]
 )
-remote = st.checkbox("🏠 Full remote")
+
 
 # ── 5) CLÉS API & IA
 st.header("2️⃣ Clés API & IA")
@@ -268,7 +268,12 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur IA {name}: {e}")
 
     # — Pole-Emploi token
-    token = fetch_ftoken(key_pe_id, key_pe_secret)
+    try:
+        token= fetch_ftoken(key_pe_id, key_pe_secret)
+    except requests.HTTPError as e:
+        status= e.response.status_code
+        ifstatus==401:
+        st.error(f"Erreur Pole emploi(code{status}):{e.response.text}")st.stop()
 
     # — Top offres pour le poste
     st.header(f"4️⃣ Top offres pour « {job_title} »")
