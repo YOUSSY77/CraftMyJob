@@ -332,7 +332,7 @@ if st.button("🚀 Lancer tout"):
     st.header("5️⃣ SIS – Métiers recommandés")
     top6 = scorer_metier(profile, referentiel, top_k=6)
     for _,r in top6.iterrows():
-        st.markdown(f"**{r['Metet']}** – {int(r['score'])}%")  # <--- vérifier que c'est bien ['Metier']
+        st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")  # <--- vérifier que c'est bien ['Metier']
         kws  = r["Metier"]
         subs = []
         for loc in sel:
