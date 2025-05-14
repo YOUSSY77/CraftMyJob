@@ -136,12 +136,29 @@ class PDFGen:
         return buf
 
 def fetch_ftoken(cid: str, secret: str) -> str:
-    url  = "https://entreprise.pole-emploi.fr/connexion/oauth2/access_token?realm=/partenaire"
-    data = {"grant_type":"client_credentials","client_id":cid,
-            "client_secret":secret,"scope":"api_offresdemploiv2 o2dsoffre"}
-    r = requests.post(url, data=data, timeout=10)
-    r.raise_for_status()
-    return r.json().get("access_token","")
+    # On enlève les espaces superflus
+    cid, secret = cid.strip(), secret.strip()
+
+    url = "https://entreprise.pole-emploi.fr/connexion/oauth2/access_token?realm=/partenaire"
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    data = {
+        "grant_type":    "client_credentials",
+        "client_id":     cid,
+        "client_secret": secret,
+        "scope":         "api_offresdemploiv2 o2dsoffre"
+    }
+
+    r = requests.post(url, data=data, headers=headers, timeout=10)
+    if r.status_code != 200:
+        # On essaie de récupérer l'erreur détaillée renvoyée par l'API
+        try:
+            err = r.json().get("error_description", r.text)
+        except ValueError:
+            err = r.text
+        raise requests.HTTPError(f"Pôle-Emploi API {r.status_code} : {err}", response=r)
+
+    return r.json()["access_token"]
+
 
 def search_offres(token: str, mots: str, lieu: str, limit=5) -> list:
     url = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
@@ -275,11 +292,9 @@ if st.button("🚀 Lancer tout"):
     try:
         token = fetch_ftoken(key_pe_id, key_pe_secret)
     except requests.HTTPError as e:
-        if e.response.status_code == 401:
-            st.error("🔑 Identifiants Pôle-Emploi invalides ou expirés.")
-        else:
-            st.error(f"⚠️ Erreur Pôle-Emploi ({e.response.status_code})")
+        st.error(f"⚠️ Impossible de récupérer le token Pôle-Emploi :\n{e}")
         st.stop()
+
 
     # — Top offres pour le poste
     st.header(f"4️⃣ Top offres pour « {job_title} »")
