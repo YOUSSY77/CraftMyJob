@@ -267,13 +267,17 @@ if st.button("🚀 Lancer tout"):
         except Exception as e:
             st.error(f"Erreur IA {name}: {e}")
 
-    # — Pole-Emploi token
+    # — Pole-Emploi token avec gestion d’erreur
     try:
-        token= fetch_ftoken(key_pe_id, key_pe_secret)
-        except requests.HTTPError as e:
-        status= e.response.status_code
-        if status==401:
-        st.error(f"Erreur Pole emploi(code{status}):{e.response.text}")st.stop()
+        token = fetch_ftoken(key_pe_id, key_pe_secret)
+    except requests.HTTPError as e:
+        status = e.response.status_code
+        if status == 401:
+            st.error("🔑 Identifiants Pôle-Emploi invalides ou expirés. Vérifiez votre Client ID et Client Secret.")
+        else:
+            st.error(f"⚠️ Erreur Pôle-Emploi (code {status}) : {e.response.text}")
+        st.stop()
+
 
     # — Top offres pour le poste
     st.header(f"4️⃣ Top offres pour « {job_title} »")
