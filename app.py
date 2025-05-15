@@ -173,15 +173,25 @@ def scorer_metier(inp:dict, df:pd.DataFrame, top_k:int=6)->pd.DataFrame:
 
 # ── 4) FORM PROFILE ─────────────────────────────────────────────────────────
 st.header("1️⃣ Profil & préférences")
-cv_text=""; up=st.file_uploader("📂 CV (optionnel)", type=["pdf","docx","txt"])
-if up:
-    ext=up.name.rsplit(".",1)[-1].lower()
-    if ext=="pdf":
-        cv_text=" ".join(p.extract_text() or "" for p in PdfReader(up).pages)
-    elif ext=="docx":
-        cv_text=" ".join(p.text for p in Document(up).paragraphs)
+
+cv_text = ""
+up = st.file_uploader("📂 CV (optionnel)", type=["pdf","docx","txt"])
+
+if up is not None:
+    # on ne rentre ici que si un fichier a été uploadé
+    try:
+        ext = up.name.rsplit(".", 1)[-1].lower()
+    except Exception:
+        ext = ""
+    if ext == "pdf":
+        cv_text = " ".join(p.extract_text() or "" for p in PdfReader(up).pages)
+    elif ext == "docx":
+        cv_text = " ".join(p.text for p in Document(up).paragraphs)
     else:
-        cv_text=up.read().decode(errors="ignore")
+        # txt ou autre
+        cv_text = up.read().decode(errors="ignore")
+# si up est None, cv_text reste ""
+
 
 job_title=st.text_input("🔤 Poste souhaité")
 missions = st.text_area("📋 Missions principales")
