@@ -127,13 +127,30 @@ class PDFGen:
         for line in text.split("\n"): pdf.multi_cell(0,8,line)
         pdf.output(buf); buf.seek(0); return buf
 
-def fetch_ftoken(cid:str, secret:str) -> str:
-    url  = "https://entreprise.pole-emploi.fr/connexion/oauth2/access_token?realm=/partenaire"
-    data = {"grant_type":"client_credentials","client_id":cid,
-            "client_secret":secret,"scope":"api_offresdemploiv2 o2dsoffre"}
-    r = requests.post(url,data=data,timeout=10)
+import base64
+
+def fetch_ftoken(client_id: str, client_secret: str) -> str:
+    """
+    Récupère un token Pôle-Emploi via OAuth2 client_credentials
+    en utilisant l'Authorization Basic.
+    """
+    url = "https://entreprise.pole-emploi.fr/connexion/oauth2/access_token?realm=/partenaire"
+    # Préparer l'en-tête Basic Auth
+    creds = f"{client_id}:{client_secret}"
+    b64 = base64.b64encode(creds.encode()).decode()
+    headers = {
+        "Authorization": f"Basic {b64}",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    data = {
+        "grant_type": "client_credentials",
+        "scope": "api_offresdemploiv2 o2dsoffre"
+    }
+    r = requests.post(url, data=data, headers=headers, timeout=10)
+    # En cas d'erreur, on remonte pour le catch côté Streamlit
     r.raise_for_status()
-    return r.json().get("access_token","")
+    return r.json()["access_token"]
+
 
 def search_offres(token:str, mots:str, lieu:str, limit:int=5) -> list:
     url = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
