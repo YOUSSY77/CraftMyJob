@@ -57,12 +57,13 @@ vecteur, tfidf_matrix = build_tfidf(referentiel)
 # ── 3) UTILITIES ─────────────────────────────────────────────────────────
 def normalize_location(loc: str) -> str:
     """
-    Retourne le code postal ou le nom de la commune en minuscules.
-    Exemples : "Courbevoie (92400)" -> "92400", "Département 92" -> "92"
+    Extrait le code département ou laisse le nom de la commune en minuscules
+    pour le passage à l'API.
     """
-    if m := re.match(r"^.+? \((\d{5})\)$", loc):
-        return m.group(1)
     if m := re.match(r"Département (\d{2})$", loc):
+        return m.group(1)
+    if m := re.match(r"^.+? \((\d{5})\)$", loc):
+        # on garde quand même le code postal pour la query API
         return m.group(1)
     return loc.lower()
 
@@ -207,15 +208,13 @@ def select_discriminant_skills(text: str,
 
 def filter_by_location(offers: list, loc_norm: str) -> list:
     """
-    Filtre les offres pour ne garder que celles dont
-    'lieuTravail_codePostal' correspond au loc_norm
-    ou dont 'lieuTravail_libelle' contient loc_norm.
+    Ne filtre plus sur le code postal (souvent erroné),
+    mais seulement sur le nom de la ville / département.
     """
     out = []
     for o in offers:
-        cp = str(o.get('lieuTravail_codePostal', '') or o.get('code_postal', ''))
         lib = o.get('lieuTravail_libelle', '').lower()
-        if loc_norm in cp or loc_norm in lib:
+        if loc_norm in lib:
             out.append(o)
     return out
 
@@ -328,44 +327,41 @@ if st.button("🚀 Lancer tout"):
 
     # — 6.5) Top Offres pour le titre souhaité
     st.header(f"4️⃣ Top offres pour « {job_title} »")
-    mots_cles = job_title  # on envoie strictement le titre
+    mots_cles = job_title  # on n'envoie que le titre
     all_offres = []
     for loc in sel:
         loc_norm = normalize_location(loc)
         offs = search_offres(token, mots_cles, loc_norm, limit=25)
-        # filtre côté client selon les bons champs renvoyés
-        offs = filter_by_location(offs, loc_norm)
+        offs = filter_by_location(offs, loc_norm)  # ne filtre plus le code postal
         all_offres.extend(offs)
 
-    # dédup par URL
+    # déduplication & fuzzy-score
     seen = {}
     for o in all_offres:
         url = o.get('url', '')
         if url and url not in seen:
             seen[url] = o
     candidates = list(seen.values())
-
-    # score fuzzy sur l'intitulé
     for o in candidates:
-        o['sim_title'] = fuzz.token_set_ratio(o.get('intitule', ''), job_title)
+        o['sim_title'] = fuzz.token_set_ratio(o.get('intitule',''), job_title)
     top4 = sorted(candidates, key=lambda x: x['sim_title'], reverse=True)[:4]
 
     if top4:
         for o in top4:
-            title = o.get('intitule', '–')
-            contract_type = o.get('typeContrat', '–')
-            libelle = o.get('lieuTravail_libelle', '–')
-            cp = o.get('lieuTravail_codePostal', o.get('code_postal', '–'))
-            url = o.get('url', '')
+            title = o.get('intitule','–')
+            typ   = o.get('typeContrat','–')
+            lib   = o.get('lieuTravail_libelle','–')
+            cp    = loc  # on n'affiche plus le code postal de l'API
+            url   = o.get('url','')
             st.markdown(
-                f"**{title}** ({contract_type}) – {libelle} [{cp}]  \n"
+                f"**{title}** ({typ}) – {lib}  \n"
                 f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---",
                 unsafe_allow_html=True
             )
     else:
         st.info("Aucune offre pertinente trouvée pour ce poste.")
 
-    # — 6.6) SIS – Métiers recommandés
+    # — 6.6) SIS – Métiers recommandés (inchangé)
     st.header("5️⃣ SIS – Métiers recommandés")
     top6 = scorer_metier(profile, referentiel, top_k=6)
     for _, r in top6.iterrows():
@@ -374,16 +370,15 @@ if st.button("🚀 Lancer tout"):
         for loc in sel:
             loc_norm = normalize_location(loc)
             subs.extend(search_offres(token, r['Metier'], loc_norm, limit=5))
-        # dédup & affiche comme précédemment...
         seen2 = set()
         for o in subs:
-            url2 = o.get('url', '')
+            url2 = o.get('url','')
             if url2 and url2 not in seen2:
                 seen2.add(url2)
-                dt = o.get('dateCreation', '')[:10]
-                lib2 = o.get('lieuTravail_libelle', '')
-                typ2 = o.get('typeContrat', '')
-                desc = o.get('description_extrait', '').replace('\n',' ')[:150] + '…'
+                dt   = o.get('dateCreation','')[:10]
+                lib2 = o.get('lieuTravail_libelle','')
+                typ2 = o.get('typeContrat','')
+                desc = (o.get('description_extrait','') or '').replace('\n',' ')[:150] + '…'
                 st.markdown(
                     f"• **{o['intitule']}** ({typ2}) – {lib2} (_Publié {dt}_)  \n"
                     f"{desc}  \n"
