@@ -257,12 +257,13 @@ if st.button("🚀 Lancer tout"):
         for line in summary.split('\n'):
             st.markdown(f"- <span class='cv-summary'>{line.strip()}</span>", unsafe_allow_html=True)
 
-    # — 6.2) Générations IA
+        # — 6.2) Générations IA
     st.header("🧠 Génération IA")
     for name in choices:
         instruction = tpls[name]
         if name == '📄 Bio LinkedIn':
             instruction += ' Ne mentionne aucune localisation ni ancienneté, limite à 4 lignes.'
+
         prompt_lines = [
             f"Poste: {job_title}",
             f"Missions: {missions}",
@@ -275,13 +276,22 @@ if st.button("🚀 Lancer tout"):
             f"Expérience: {exp_level}",
             f"Contrat(s): {', '.join(contract)}",
             f"Télétravail: {'Oui' if remote else 'Non'}",
-            '', instruction
+            "",
+            instruction
         ]
         prompt = "\n".join(prompt_lines)
+
         try:
             res = get_gpt_response(prompt, key_openai)
             st.subheader(name)
             st.markdown(res)
+        except requests.HTTPError as e:
+            if e.response.status_code == 401:
+                st.error("🔑 Clé OpenAI invalide ou expirée.")
+            else:
+                st.error(f"Erreur OpenAI ({e.response.status_code}) : {e.response.text}")
+            st.stop()
+
            
     # — 6.3) Token Pôle-Emploi
     try:
