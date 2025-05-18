@@ -3,9 +3,9 @@
 CraftMyJob – Streamlit app for smart job suggestions
 """
 import os
-import io
 import re
 import time
+import io
 import requests
 import pandas as pd
 import streamlit as st
@@ -36,7 +36,7 @@ st.markdown("""
 try:
     logo = Image.open("logo_jobseekers.PNG")
     st.image(logo, width=120)
-except:
+except FileNotFoundError:
     pass
 st.title("✨ CraftMyJob – Votre assistant emploi intelligent")
 
@@ -57,18 +57,12 @@ vecteur, tfidf_matrix = build_tfidf(referentiel)
 
 # ── 3) UTILITIES ─────────────────────────────────────────────────────────
 def normalize_location(loc: str) -> str:
-    # e.g. "Paris (75000)"
+    if m := re.match(r"^.+? \((\d{2})\)$", loc):
+        return m.group(1)  # département code
     if m := re.match(r"^(.+?) \((\d{5})\)$", loc):
-        return m.group(2)  # renvoyer le code postal
-    # "Département 92"
-    if m2 := re.match(r"Département (\d{2})$", loc):
-        return m2.group(1)
-    # "Hauts de Seine (92)"
-    if m4 := re.match(r"^.+? \((\d{2})\)$", loc):
-        return m4.group(1)
-    # région ou autre : on renvoie en minuscule pour recherche sur nom de ville
-    if m3 := re.match(r"^(.+) \(region:(\d+)\)$", loc):
-        return m3.group(1).lower()
+        return m.group(2)  # code postal
+    if m := re.match(r"Département (\d{2})$", loc):
+        return m.group(1)
     return loc.lower()
 
 def get_date_range(months: int = 2):
@@ -93,7 +87,7 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
         "https://geo.api.gouv.fr/communes",
         params={"nom": query, "fields": "nom,codesPostaux", "limit": limit}, timeout=5
     )
-    if r1.status_code == 200:
+    if r1.ok:
         for e in r1.json():
             cp = e.get("codesPostaux", ["00000"])[0]
             res.append(f"{e['nom']} ({cp})")
@@ -101,28 +95,14 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
         "https://geo.api.gouv.fr/regions",
         params={"nom": query, "fields": "nom,code"}, timeout=5
     )
-    if r2.status_code == 200:
+    if r2.ok:
         for rg in r2.json():
             res.append(f"{rg['nom']} (region:{rg['code']})")
     return list(dict.fromkeys(res))
 
-def build_keywords(texts: list[str], max_terms: int = 10) -> str:
-    combined = " ".join(texts).lower()
-    tokens = re.findall(r"\w{2,}", combined)
-    stop = {"et","ou","la","le","les","de","des","du","un","une",
-            "à","en","pour","par","avec","sans","sur","dans","au","aux"}
-    seen, kws = set(), []
-    for t in tokens:
-        if t in stop or t in seen:
-            continue
-        seen.add(t); kws.append(t)
-        if len(kws) >= max_terms:
-            break
-    return ",".join(kws)
-
 def get_gpt_response(prompt: str, key: str) -> str:
     url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {key}"}
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     data = {
         "model": "gpt-3.5-turbo",
         "messages": [
@@ -151,8 +131,8 @@ def fetch_ftoken(cid: str, secret: str) -> str:
 def search_offres(token: str, mots: str, lieu: str, limit: int = 25,
                   max_retries: int = 3, backoff_factor: float = 0.5) -> list:
     """
-    Recherche les offres via l'API FranceTravail avec retry sur erreurs 5xx
-    et tri par pertinence.
+    Recherche des offres via l'API France Travail, triées par pertinence,
+    avec retry en cas d'erreur 5xx.
     """
     url = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
     dateDebut, dateFin = get_date_range(2)
@@ -179,25 +159,9 @@ def search_offres(token: str, mots: str, lieu: str, limit: int = 25,
             return r.json().get("resultats", [])
         except RequestException:
             if attempt == max_retries:
-                st.warning(
-                    "⚠️ Problème technique avec l’API FranceTravail — "
-                    "certaines offres n'ont pas pu être récupérées."
-                )
+                st.warning("⚠️ L'API France Travail est momentanément indisponible.")
                 return []
             time.sleep(backoff_factor * (2 ** (attempt-1)))
-
-def filter_by_location(offers: list, loc_norm: str) -> list:
-    """
-    Filtre les offres par département (code postal) ou par nom de ville.
-    """
-    out = []
-    for o in offers:
-        lib = o.get('lieuTravail', {}).get('libelle', "").lower()
-        cp  = str(o.get('lieuTravail', {}).get('codePostal', ""))
-        # si loc_norm est dept (2 chiffres) et cp commence par loc_norm
-        if (len(loc_norm) == 2 and cp.startswith(loc_norm)) or loc_norm in lib:
-            out.append(o)
-    return out
 
 def scorer_metier(inp: dict, df: pd.DataFrame, top_k: int = 6) -> pd.DataFrame:
     doc = f"{inp['missions']} {inp['skills']} {inp['job_title']}"
@@ -214,12 +178,10 @@ def scorer_metier(inp: dict, df: pd.DataFrame, top_k: int = 6) -> pd.DataFrame:
 
 def generate_title_variants(title: str) -> list[str]:
     variants = {title.strip()}
-    # Pluriel/singulier simple
     if not title.endswith("s"):
         variants.add(f"{title}s")
     else:
         variants.add(title.rstrip("s"))
-    # Quelques synonymes ciblés
     synmap = {
         "manager": ["responsable", "chef"],
         "assistant": ["adjoint"],
@@ -231,10 +193,10 @@ def generate_title_variants(title: str) -> list[str]:
             variants.update(synmap[mot])
     return list(variants)
 
-def select_discriminant_skills(skills: str,
+def select_discriminant_skills(text: str,
                                vectorizer: TfidfVectorizer,
-                               top_n: int = 5) -> list[str]:
-    tokens = re.findall(r"\w{2,}", skills.lower())
+                               top_n: int = 10) -> list[str]:
+    tokens = re.findall(r"\w{2,}", text.lower())
     features = vectorizer.get_feature_names_out()
     idf_vals = vectorizer.idf_
     idf_map = dict(zip(features, idf_vals))
@@ -261,11 +223,11 @@ skills    = st.text_area("🧠 Compétences clés")
 
 st.markdown("<div class='section-header'>🌍 Territoires</div>", unsafe_allow_html=True)
 typed = st.text_input("Tapez commune/département/région…")
-opts  = search_territoires(typed) if typed else []
+opts = search_territoires(typed) if typed else []
 default_locs = st.session_state.get('locations', [])
-sel   = st.multiselect("Sélectionnez vos territoires",
-                       options=(default_locs+opts),
-                       default=default_locs)
+sel = st.multiselect("Sélectionnez vos territoires",
+                     options=(default_locs + opts),
+                     default=default_locs)
 st.session_state['locations'] = sel
 
 exp_level = st.radio("🎯 Expérience",
@@ -273,7 +235,7 @@ exp_level = st.radio("🎯 Expérience",
 contract = st.multiselect("📄 Types de contrat",
                           ["CDI","CDD","Freelance","Stage","Alternance"],
                           default=["CDI","CDD","Freelance"])
-remote   = st.checkbox("🏠 Full remote")
+remote = st.checkbox("🏠 Full remote")
 
 # ── 5) CLÉS API & IA ───────────────────────────────────────────────────
 st.header("2️⃣ Clés API & IA")
@@ -298,16 +260,16 @@ if st.button("🚀 Lancer tout"):
 
     profile = {'job_title': job_title, 'missions': missions, 'skills': skills}
 
-    # — 6.1) Résumé CV
+    # 6.1) Résumé CV
     if cv_text:
-        prompt_summary = f"Résumé en 5 points clés du CV suivant:\n{cv_text[:1000]}"
-        summary = get_gpt_response(prompt_summary, key_openai)
+        summary = get_gpt_response(f"Résumé en 5 points clés du CV suivant:\n{cv_text[:1000]}",
+                                   key_openai)
         st.markdown("**Résumé CV:**", unsafe_allow_html=True)
         for line in summary.split('\n'):
             st.markdown(f"- <span class='cv-summary'>{line.strip()}</span>",
                         unsafe_allow_html=True)
 
-    # — 6.2) Générations IA
+    # 6.2) Générations IA
     st.header("🧠 Génération IA")
     for name in choices:
         inst = tpls[name]
@@ -329,53 +291,55 @@ if st.button("🚀 Lancer tout"):
             st.subheader(name)
             st.markdown(res)
         except requests.HTTPError as e:
-            if e.response.status_code == 401:
-                st.error("Clé OpenAI invalide ou expirée.")
-            else:
-                st.error(f"Erreur OpenAI ({e.response.status_code}) : {e.response.text}")
+            st.error(f"Erreur OpenAI ({e.response.status_code}) : {e.response.text}")
             st.stop()
 
-    # — 6.3) Token Pôle-Emploi
+    # 6.3) Token Pôle-Emploi
     try:
         token = fetch_ftoken(key_pe_id, key_pe_secret)
     except requests.HTTPError as e:
-        if e.response.status_code == 401:
-            st.error("🔑 Identifiants Pôle-Emploi invalides ou expirés.")
-        else:
-            st.error(f"Erreur Pôle-Emploi ({e.response.status_code}) : {e.response.text}")
+        st.error(f"Erreur Pôle-Emploi ({e.response.status_code}) : {e.response.text}")
         st.stop()
 
-    # — 6.4) Mots-clés ATS
+    # 6.4) Mots-clés ATS (discriminants via TF-IDF)
     st.header("🔑 Mots-clés recommandés pour l’ATS")
     best = scorer_metier(profile, referentiel, top_k=1).iloc[0]
-    kws_ats = build_keywords([best['Activites'], best['Competences']], max_terms=10)
-    for kw in kws_ats.split(','):
+    combined = best['Activites'] + " " + best['Competences']
+    ats_keys = select_discriminant_skills(combined, vecteur, top_n=10)
+    for kw in ats_keys:
         st.markdown(f"- {kw}")
 
-    # — 6.5) Top Offres (ciblées)
+    # 6.5) Top Offres (strictement pour le titre souhaité)
     st.header(f"4️⃣ Top offres pour « {job_title} »")
-    variants    = generate_title_variants(job_title)
-    disc_skills = select_discriminant_skills(skills, vecteur, top_n=5)
-    keywords    = " ".join([job_title] + variants + disc_skills)
-    all_offres  = []
+    # on envoie juste le titre exact pour ne pas élargir
+    mots_cles = job_title
+    all_offres = []
     for loc in sel:
         loc_norm = normalize_location(loc)
-        offs = search_offres(token, keywords, loc_norm, limit=25)
-        offs = filter_by_location(offs, loc_norm)
+        offs = search_offres(token, mots_cles, loc_norm, limit=25)
+        # on retire tout filtrage local ici pour laisser l'API gérer la localisation
         all_offres.extend(offs)
-    all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
 
+    # contraction par URL unique
+    seen = {}
     for o in all_offres:
-        o['sim_title'] = fuzz.token_set_ratio(o.get('intitule',''), job_title)
-    top4 = sorted(all_offres, key=lambda x: x['sim_title'], reverse=True)[:4]
+        url = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine', '')
+        if url and url not in seen:
+            seen[url] = o
+    candidates = list(seen.values())
 
+    # on score fuzzy uniquement sur l'intitulé
+    for o in candidates:
+        o['sim_title'] = fuzz.token_set_ratio(o.get('intitule', ''), job_title)
+
+    top4 = sorted(candidates, key=lambda x: x['sim_title'], reverse=True)[:4]
     if top4:
         for o in top4:
-            title = o.get('intitule','–')
+            title = o.get('intitule', '–')
             lib   = o['lieuTravail']['libelle']
             cp    = o['lieuTravail']['codePostal']
-            typ   = o.get('typeContrat','–')
-            url   = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
+            typ   = o.get('typeContrat', '–')
+            url   = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine', '')
             st.markdown(
                 f"**{title}** ({typ}) – {lib} [{cp}]  \n"
                 f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---",
@@ -384,7 +348,7 @@ if st.button("🚀 Lancer tout"):
     else:
         st.info("Aucune offre pertinente trouvée pour ce poste.")
 
-    # — 6.6) SIS – Métiers recommandés
+    # 6.6) SIS – Métiers recommandés
     st.header("5️⃣ SIS – Métiers recommandés")
     top6 = scorer_metier(profile, referentiel, top_k=6)
     for _, r in top6.iterrows():
@@ -392,25 +356,24 @@ if st.button("🚀 Lancer tout"):
         subs = []
         for loc in sel:
             loc_norm = normalize_location(loc)
-            tmp = search_offres(token, r['Metier'], loc_norm, limit=5)
-            tmp = filter_by_location(tmp, loc_norm)
-            subs.extend(tmp)
-        subs = [o for o in subs if o.get('typeContrat','') in contract]
-        if subs:
-            seen2 = set()
-            for o in subs:
-                url2 = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
-                if url2 not in seen2:
-                    seen2.add(url2)
-                    dt   = o.get('dateCreation','')[:10]
-                    lib2 = o['lieuTravail']['libelle']
-                    typ2 = o.get('typeContrat','–')
-                    desc = (o.get('description','') or '').replace('\n',' ')[:150] + '…'
-                    st.markdown(
-                        f"• **{o['intitule']}** ({typ2}) – {lib2} (_Publié {dt}_)  \n"
-                        f"{desc}  \n"
-                        f"<span class='offer-link'><a href='{url2}' target='_blank'>Voir / Postuler</a></span>",
-                        unsafe_allow_html=True
-                    )
-        else:
+            subs.extend(search_offres(token, r['Metier'], loc_norm, limit=5))
+        # dédup et affichage comme avant...
+        seen2 = set()
+        for o in subs:
+            url2 = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine', '')
+            if url2 and url2 not in seen2:
+                seen2.add(url2)
+                dt = o.get('dateCreation', '')[:10]
+                lib2 = o['lieuTravail']['libelle']
+                typ2 = o.get('typeContrat', '–')
+                desc = (o.get('description', '') or '').replace('\n', ' ')[:150] + '…'
+                st.markdown(
+                    f"• **{o['intitule']}** ({typ2}) – {lib2} (_Publié {dt}_)  \n"
+                    f"{desc}  \n"
+                    f"<span class='offer-link'><a href='{url2}' target='_blank'>Voir / Postuler</a></span>",
+                    unsafe_allow_html=True
+                )
+        if not subs:
             st.info("Aucune offre trouvée pour ce métier dans vos territoires et contrats.")
+
+    
