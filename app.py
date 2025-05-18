@@ -9,7 +9,6 @@ import requests
 import pandas as pd
 import streamlit as st
 from PIL import Image
-from fpdf import FPDF
 from PyPDF2 import PdfReader
 from docx import Document
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -57,7 +56,6 @@ vecteur, tfidf_matrix = build_tfidf(referentiel)
 
 # ── 3) UTILITIES ─────────────────────────────────────────────────────────
 def normalize_location(loc: str) -> str:
-    """Extract plain name or department for API and filtering."""
     if m := re.match(r"^(.+?) \((\d{5})\)", loc):
         return m.group(1)
     if m2 := re.match(r"Département (\d{2})", loc):
@@ -66,12 +64,10 @@ def normalize_location(loc: str) -> str:
         return m3.group(1)
     return loc
 
-
 def get_date_range(months: int = 2):
     end = datetime.now().date()
     start = end - timedelta(days=months * 30)
     return start.isoformat(), end.isoformat()
-
 
 def search_territoires(query: str, limit: int = 10) -> list[str]:
     res = []
@@ -86,7 +82,6 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
             res.append(f"{e['nom']} ({cp})")
         res.append(f"Département {query}")
         return list(dict.fromkeys(res))
-    # communes
     r1 = requests.get(
         "https://geo.api.gouv.fr/communes",
         params={"nom": query, "fields": "nom,codesPostaux", "limit": limit}, timeout=5
@@ -95,7 +90,6 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
         for e in r1.json():
             cp = e.get("codesPostaux", ["00000"])[0]
             res.append(f"{e['nom']} ({cp})")
-    # régions
     r2 = requests.get(
         "https://geo.api.gouv.fr/regions",
         params={"nom": query, "fields": "nom,code"}, timeout=5
@@ -104,7 +98,6 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
         for rg in r2.json():
             res.append(f"{rg['nom']} (region:{rg['code']})")
     return list(dict.fromkeys(res))
-
 
 def build_keywords(texts: list[str], max_terms: int = 7) -> str:
     combined = " ".join(texts).lower()
@@ -119,7 +112,6 @@ def build_keywords(texts: list[str], max_terms: int = 7) -> str:
         if len(kws) >= max_terms:
             break
     return ",".join(kws)
-
 
 def get_gpt_response(prompt: str, key: str) -> str:
     url = "https://api.openai.com/v1/chat/completions"
@@ -137,23 +129,6 @@ def get_gpt_response(prompt: str, key: str) -> str:
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]
 
-class PDFGen:
-    @staticmethod
-    def to_pdf(text: str) -> io.BytesIO:
-        buf = io.BytesIO()
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        for line in text.split("
-"):
-            # On remplace les caractères hors Latin-1 pour éviter les erreurs de police
-            safe_line = line.encode('latin-1', 'replace').decode('latin-1')
-            pdf.multi_cell(0, 8, safe_line)
-        pdf.output(buf)
-        buf.seek(0)
-        return buf
-
-
 def fetch_ftoken(cid: str, secret: str) -> str:
     url = "https://entreprise.pole-emploi.fr/connexion/oauth2/access_token?realm=/partenaire"
     data = {
@@ -165,7 +140,6 @@ def fetch_ftoken(cid: str, secret: str) -> str:
     r = requests.post(url, data=data, timeout=10)
     r.raise_for_status()
     return r.json().get("access_token", "")
-
 
 def search_offres(token: str, mots: str, lieu: str, limit: int = 5) -> list:
     url = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
@@ -186,7 +160,6 @@ def search_offres(token: str, mots: str, lieu: str, limit: int = 5) -> list:
         return []
     return r.json().get("resultats", [])
 
-
 def filter_by_location(offers: list, loc_norm: str) -> list:
     out = []
     cp_norm = loc_norm.lower()
@@ -196,7 +169,6 @@ def filter_by_location(offers: list, loc_norm: str) -> list:
         if cp_norm in lib or cp_norm == cp:
             out.append(o)
     return out
-
 
 def scorer_metier(inp: dict, df: pd.DataFrame, top_k: int = 6) -> pd.DataFrame:
     doc = f"{inp['missions']} {inp['skills']} {inp['job_title']}"
@@ -210,9 +182,37 @@ def scorer_metier(inp: dict, df: pd.DataFrame, top_k: int = 6) -> pd.DataFrame:
     df2['score'] = (0.5*df2['cosine'] + 0.2*df2['fz_t'] + 0.15*df2['fz_m'] + 0.15*df2['fz_c']) * 100
     return df2.nlargest(top_k, 'score')
 
+# ── 3.a) NOUVELLES UTILITIES POUR TOP 4 ─────────────────────────────────
+def generate_title_variants(title: str) -> list[str]:
+    variants = {title.strip()}
+    if not title.endswith("s"):
+        variants.add(f"{title}s")
+    else:
+        variants.add(title.rstrip("s"))
+    synmap = {
+        "manager": ["responsable", "chef"],
+        "assistant": ["adjoint"],
+        "developer": ["développeur"],
+        "engineer": ["ingénieur"],
+    }
+    for mot in title.lower().split():
+        if mot in synmap:
+            variants.update(synmap[mot])
+    return list(variants)
+
+def select_discriminant_skills(skills: str,
+                               vectorizer: TfidfVectorizer,
+                               top_n: int = 5) -> list[str]:
+    tokens = re.findall(r"\w{2,}", skills.lower())
+    features = vectorizer.get_feature_names_out()
+    idf_vals = vectorizer.idf_
+    idf_map = dict(zip(features, idf_vals))
+    scored = [(t, idf_map.get(t, 0)) for t in set(tokens)]
+    scored = sorted(scored, key=lambda x: x[1], reverse=True)
+    return [t for t,_ in scored[:top_n]]
+
 # ── 4) PROFILE FORM ──────────────────────────────────────────────────────
 st.header("1️⃣ Profil & préférences")
-# CV upload & extraction
 cv_text = ""
 up = st.file_uploader("📂 CV (optionnel)", type=["pdf","docx","txt"])
 if up:
@@ -228,7 +228,7 @@ job_title = st.text_input("🔤 Poste souhaité")
 missions  = st.text_area("📋 Missions principales")
 skills    = st.text_area("🧠 Compétences clés")
 
-st.markdown("""<div class='section-header'>🌍 Territoires</div>""", unsafe_allow_html=True)
+st.markdown("<div class='section-header'>🌍 Territoires</div>", unsafe_allow_html=True)
 typed = st.text_input("Tapez commune/département/région…")
 opts  = search_territoires(typed) if typed else []
 default_locs = st.session_state.get('locations', [])
@@ -248,8 +248,7 @@ key_pe_secret = st.text_input("🔑 Pôle-Emploi Client Secret", type="password"
 tpls = {
     '📄 Bio LinkedIn':    'Rédige une bio LinkedIn professionnelle.',
     '✉️ Mail de candidature': 'Écris un mail de candidature spontanée.',
-    '📃 Mini CV':         'Génère un mini-CV (5-7 lignes).',
-    '🧩 CV optimisé IA':  'Optimise le CV en soulignant deux mots-clés.'
+    '📃 Mini CV':         'Génère un mini-CV (5-7 lignes).'
 }
 choices = st.multiselect("Générations IA", list(tpls.keys()), default=list(tpls.keys())[:2])
 
@@ -297,9 +296,6 @@ if st.button("🚀 Lancer tout"):
             res = get_gpt_response(prompt, key_openai)
             st.subheader(name)
             st.markdown(res)
-            if name == '🧩 CV optimisé IA':
-                buf = PDFGen.to_pdf(res)
-                st.download_button("📥 Télécharger CV optimisé", data=buf, file_name="CV_optimise.pdf", mime="application/pdf")
         except requests.HTTPError as e:
             if e.response.status_code == 401:
                 st.error("Clé OpenAI invalide ou expirée.")
@@ -318,43 +314,50 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur Pôle-Emploi (code {status}) : {e.response.text}")
         st.stop()
 
-    # — 6.4) Top Offres
-    st.header(f"4️⃣ Top offres pour '{job_title}'")
-    keywords = job_title
-    all_offres = []
+    # — 6.4) Top Offres (requête ciblée)
+    st.header(f"4️⃣ Top offres pour « {job_title} »")
+    variants     = generate_title_variants(job_title)
+    disc_skills  = select_discriminant_skills(skills, vecteur, top_n=5)
+    keywords     = " ".join(variants + disc_skills)
+    all_offres   = []
     for loc in sel:
         loc_norm = normalize_location(loc)
-        offs = search_offres(token, keywords, loc_norm, limit=5)
+        offs = search_offres(token, keywords, loc_norm, limit=10)
         offs = filter_by_location(offs, loc_norm)
         all_offres.extend(offs)
-    # filtre contrat
+
+    # Filtre par type de contrat
     all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
-    # dédup
-    seen = {}
+
+    # Score fuzzy sur le titre et sélection des 4 meilleures
     for o in all_offres:
-        url = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
-        if url and url not in seen:
-            seen[url] = o
-    if seen:
-        for url, o in list(seen.items())[:5]:
+        o['sim_title'] = fuzz.token_set_ratio(o.get('intitule',''), job_title)
+    top4 = sorted(all_offres, key=lambda x: x['sim_title'], reverse=True)[:4]
+
+    if top4:
+        for o in top4:
             title = o.get('intitule','–')
             lib   = o['lieuTravail']['libelle']
             cp    = o['lieuTravail']['codePostal']
             typ   = o.get('typeContrat','–')
-            st.markdown(f"**{title}** ({typ}) – {lib} [{cp}]  \n<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---", unsafe_allow_html=True)
+            url   = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
+            st.markdown(
+                f"**{title}** ({typ}) – {lib} [{cp}]  \n"
+                f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---",
+                unsafe_allow_html=True
+            )
     else:
-        st.info("Aucune offre trouvée pour ce poste dans vos territoires et contrats.")
+        st.info("Aucune offre pertinente trouvée pour ce poste.")
 
-    # — 6.5) SIS Métiers
+    # — 6.5) SIS – Métiers recommandés
     st.header("5️⃣ SIS – Métiers recommandés")
     top6 = scorer_metier(profile, referentiel, top_k=6)
     for _, r in top6.iterrows():
         st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
-        kws = r['Metier']
         subs = []
         for loc in sel:
             loc_norm = normalize_location(loc)
-            tmp = search_offres(token, kws, loc_norm, limit=3)
+            tmp = search_offres(token, r['Metier'], loc_norm, limit=3)
             tmp = filter_by_location(tmp, loc_norm)
             subs.extend(tmp)
         subs = [o for o in subs if o.get('typeContrat','') in contract]
@@ -368,7 +371,11 @@ if st.button("🚀 Lancer tout"):
                     lib  = o['lieuTravail']['libelle']
                     typ  = o.get('typeContrat','–')
                     desc = (o.get('description','') or '').replace('\n',' ')[:150] + '…'
-                    st.markdown(f"• **{o['intitule']}** ({typ}) – {lib} (_Publié {dt}_)  \n{desc}  \n<span class='offer-link'><a href='{url2}' target='_blank'>Voir / Postuler</a></span>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"• **{o['intitule']}** ({typ}) – {lib} (_Publié {dt}_)  \n"
+                        f"{desc}  \n"
+                        f"<span class='offer-link'><a href='{url2}' target='_blank'>Voir / Postuler</a></span>",
+                        unsafe_allow_html=True
+                    )
         else:
             st.info("Aucune offre trouvée pour ce métier dans vos territoires et contrats.")
-
