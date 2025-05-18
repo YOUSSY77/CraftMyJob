@@ -157,7 +157,7 @@ def scorer_metier(inp: dict,df: pd.DataFrame,top_k: int=6) -> pd.DataFrame:
     doc=f"{inp['missions']} {inp['skills']} {inp['job_title']}"
     v=vecteur.transform([doc]); cos=cosine_similarity(v,tfidf_matrix).flatten()
     df2=df.copy(); df2['cosine']=cos
-    df2['fz_t']=df2['Metetier'].apply(lambda m:fuzz.WRatio(m,inp['job_title'])/100)
+    df2['fz_t']=df2['Metier'].apply(lambda m:fuzz.WRatio(m,inp['job_title'])/100)
     df2['fz_m']=df2['Activites'].apply(lambda a:fuzz.partial_ratio(a,inp['missions'])/100)
     df2['fz_c']=df2['Competences'].apply(lambda c:fuzz.partial_ratio(c,inp['skills'])/100)
     df2['score']=(0.5*df2['cosine']+0.2*df2['fz_t']+0.15*df2['fz_m']+0.15*df2['fz_c'])*100
