@@ -250,27 +250,49 @@ if st.button("🚀 Lancer tout"):
     else:
         st.info("Aucune offre pertinente trouvée.")
 
-    # SIS Métiers
+       # — 6.5) SIS – Métiers recommandés (corrigé) —────────────────────────
     st.header("5️⃣ SIS – Métiers recommandés")
-    top6=scorer_metier(profile,referentiel,top_k=6)
-    for _,r in top6.iterrows():
-        m,intit=r["Metier"],int(r["score"])
-        st.markdown(f"**{m}** – {intit}%")
-        subs=[]
+    top6 = scorer_metier(profile, referentiel, top_k=6)
+    for _, r in top6.iterrows():
+        metier = r["Metier"]
+        score  = int(r["score"])
+        st.markdown(f"**{metier}** – {score}%")
+
+        # récupère jusqu'à 3 offres pour ce métier
+        subs = []
         for loc in sel:
-            subs+=fetch_all_offres(token,m,normalize_location(loc),batch_size=3,max_batches=1)
-        subs=[o for o in subs if o.get("typeContrat","") in contract]
-        seen2=set()
+            locn = normalize_location(loc)
+            # utilise directement fetch_all_offres pour la pagination mini
+            subs += fetch_all_offres(token, metier, locn, batch_size=3, max_batches=1)
+
+        # filtre contrat
+        subs = [o for o in subs if o.get("typeContrat", "") in contract]
+
+        # dédup par URL
+        seen2 = set()
         if subs:
             for o in subs:
-                url2=o.get("url","") or o.get("contact",{}).get("urlPostulation","")
-                if url2 not in seen2:
-                    seen2.add(url2)
-                    st.markdown(
-                        f"• **{o['intitule']}** ({o['typeContrat']}) – {o['lieuTravail_libelle']} (_{o['dateCreation'][:10]}_)  \n"
-                        f"{(o['description_extrait'] or '')[:150]}…  \n"
-                        f"<a href='{url2}' target='_blank'>Voir / Postuler</a>"
-                    )
+                # fallback pour URL
+                url2 = o.get("url") or o.get("contact", {}).get("urlPostulation") or o.get("contact", {}).get("urlOrigine", "")
+                if not url2 or url2 in seen2:
+                    continue
+                seen2.add(url2)
+
+                # accès robustes aux champs
+                title2 = o.get("intitule", "–")
+                typ2   = o.get("typeContrat", "–")
+                # fallback imbriqué ou plat
+                lieu2  = o.get("lieuTravail_libelle",
+                              o.get("lieuTravail", {}).get("libelle", "–"))
+                date2  = o.get("dateCreation", "")[:10]
+                desc2  = (o.get("description_extrait", "") or o.get("description", ""))[:150] + "…"
+
+                st.markdown(
+                    f"• **{title2}** ({typ2}) – {lieu2} (_Publié {date2}_)  \n"
+                    f"{desc2}  \n"
+                    f"<span class='offer-link'><a href='{url2}' target='_blank'>Voir / Postuler</a></span>",
+                    unsafe_allow_html=True
+                )
         else:
-            st.info("Aucune offre pour ce métier.")
+            st.info("Aucune offre trouvée pour ce métier dans vos territoires et contrats.")
 
