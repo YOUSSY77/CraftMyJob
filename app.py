@@ -37,7 +37,7 @@ try:
     st.image(logo, width=120)
 except:
     pass
-st.title("✨ CraftMyJob – Votre assistant emploi intelligent")
+st.title("CraftMyJob – Votre assistant emploi intelligent")
 
 # ── 2) DATA & MODEL PREP ─────────────────────────────────────────────────
 @st.cache_data
@@ -234,7 +234,7 @@ tpls = {
     '📄 Bio LinkedIn':    'Rédige une bio LinkedIn professionnelle.',
     '✉️ Mail de candidature': 'Écris un mail de candidature spontanée.',
     '📃 Mini CV':         'Génère un mini-CV (5-7 lignes).',
-    '🧩 CV optimisé IA':  'Optimise le CV en soulignant deux mots-clés.'
+    '🧩 CV optimisé IA':  'Optimise le CV en soulignant quatre mots-clés.'
 }
 choices = st.multiselect("Générations IA", list(tpls.keys()), default=list(tpls.keys())[:2])
 
@@ -282,16 +282,7 @@ if st.button("🚀 Lancer tout"):
             res = get_gpt_response(prompt, key_openai)
             st.subheader(name)
             st.markdown(res)
-            if name == '🧩 CV optimisé IA':
-                buf = PDFGen.to_pdf(res)
-                st.download_button("📥 Télécharger CV optimisé", data=buf, file_name="CV_optimise.pdf", mime="application/pdf")
-        except requests.HTTPError as e:
-            if e.response.status_code == 401:
-                st.error("Clé OpenAI invalide ou expirée.")
-            else:
-                st.error(f"Erreur OpenAI ({e.response.status_code}) : {e.response.text}")
-            st.stop()
-
+           
     # — 6.3) Token Pôle-Emploi
     try:
         token = fetch_ftoken(key_pe_id, key_pe_secret)
@@ -303,7 +294,7 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur Pôle-Emploi (code {status}) : {e.response.text}")
         st.stop()
 
-           # — 6.4) Top 30 Offres pour le titre souhaité —─────────────────────────
+           # — 6.4) Top Offres pour le titre souhaité —─────────────────────────
     st.header(f"4️⃣ Top offres pour '{job_title}'")
 
     # On conserve juste le titre exact pour la query
