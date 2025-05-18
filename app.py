@@ -278,11 +278,19 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur OpenAI ({e.response.status_code}): {e.response.text}")
             st.stop()
 
-    # 6.3) Token Pôle-Emploi
+    
+   # — 6.3) Token Pôle-Emploi (avec debug & strip)
+    # On retire systématiquement espaces et retours à la ligne
+    cid    = key_pe_id.strip()
+    secret = key_pe_secret.strip()
+    # Affiche pour debug sans dévoiler tout : longueur et début de l’ID
+    st.write(f"Pôle-Emploi Client ID reçu (longueur {len(cid)}): '{cid[:5]}…'")
     try:
-        token = fetch_ftoken(key_pe_id, key_pe_secret)
+        token = fetch_ftoken(cid, secret)
+        st.success("✅ Token Pôle-Emploi récupéré avec succès")
     except requests.HTTPError as e:
-        st.error(f"Erreur Pôle-Emploi ({e.response.status_code}): {e.response.text}")
+        # Affiche le code d’erreur et la réponse complète du serveur
+        st.error(f"Erreur Pôle-Emploi ({e.response.status_code}) : {e.response.text}")
         st.stop()
 
     # 6.4) Top 30 Offres
