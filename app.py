@@ -5,6 +5,7 @@ CraftMyJob – Streamlit app for smart job suggestions
 import os
 import io
 import re
+import time
 import requests
 import pandas as pd
 import streamlit as st
@@ -13,6 +14,7 @@ from PyPDF2 import PdfReader
 from docx import Document
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from requests.exceptions import RequestException
 from rapidfuzz import fuzz
 from datetime import datetime, timedelta
 
@@ -37,7 +39,7 @@ try:
     st.image(logo, width=120)
 except:
     pass
-st.title("✨ CraftMyJob – Votre assistant emploi intelligent")
+st.title(" CraftMyJob – Votre assistant emploi intelligent by Jobseeker HubFrance")
 
 # ── 2) DATA & MODEL PREP ─────────────────────────────────────────────────
 @st.cache_data
@@ -99,7 +101,7 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
             res.append(f"{rg['nom']} (region:{rg['code']})")
     return list(dict.fromkeys(res))
 
-def build_keywords(texts: list[str], max_terms: int = 7) -> str:
+def build_keywords(texts: list[str], max_terms: int = 10) -> str:
     combined = " ".join(texts).lower()
     tokens = re.findall(r"\w{2,}", combined)
     stop = {"et","ou","la","le","les","de","des","du","un","une",
@@ -141,7 +143,11 @@ def fetch_ftoken(cid: str, secret: str) -> str:
     r.raise_for_status()
     return r.json().get("access_token", "")
 
-def search_offres(token: str, mots: str, lieu: str, limit: int = 5) -> list:
+def search_offres(token: str, mots: str, lieu: str, limit: int = 5,
+                  max_retries: int = 3, backoff_factor: float = 0.5) -> list:
+    """
+    Recherche les offres via l'API FranceTravail avec retry sur erreurs 5xx.
+    """
     url = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
     dateDebut, dateFin = get_date_range(2)
     params = {
@@ -152,13 +158,30 @@ def search_offres(token: str, mots: str, lieu: str, limit: int = 5) -> list:
         "dateFin": dateFin,
         "tri": "dateCreation"
     }
-    r = requests.get(url, headers={"Authorization": f"Bearer {token}"}, params=params, timeout=10)
-    if r.status_code == 204:
-        return []
-    if r.status_code not in (200, 206):
-        st.error(f"FT API {r.status_code}: {r.text}")
-        return []
-    return r.json().get("resultats", [])
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                params=params,
+                timeout=10
+            )
+            if 500 <= r.status_code < 600:
+                raise RequestException(f"Server error {r.status_code}")
+            if r.status_code == 204:
+                return []
+            if r.status_code not in (200, 206):
+                st.error(f"FT API {r.status_code}: {r.text}")
+                return []
+            return r.json().get("resultats", [])
+        except RequestException:
+            if attempt == max_retries:
+                st.warning(
+                    "⚠️ Problème technique avec l’API FranceTravail — "
+                    "certaines offres n'ont pas pu être récupérées."
+                )
+                return []
+            time.sleep(backoff_factor * (2 ** (attempt - 1)))
 
 def filter_by_location(offers: list, loc_norm: str) -> list:
     out = []
@@ -179,10 +202,11 @@ def scorer_metier(inp: dict, df: pd.DataFrame, top_k: int = 6) -> pd.DataFrame:
     df2['fz_t'] = df2['Metier'].apply(lambda m: fuzz.token_set_ratio(m, inp['job_title']) / 100)
     df2['fz_m'] = df2['Activites'].apply(lambda a: fuzz.token_set_ratio(a, inp['missions']) / 100)
     df2['fz_c'] = df2['Competences'].apply(lambda c: fuzz.token_set_ratio(c, inp['skills']) / 100)
-    df2['score'] = (0.5*df2['cosine'] + 0.2*df2['fz_t'] + 0.15*df2['fz_m'] + 0.15*df2['fz_c']) * 100
+    df2['score'] = (0.5*df2['cosine'] + 0.2*df2['fz_t'] +
+                    0.15*df2['fz_m'] + 0.15*df2['fz_c']) * 100
     return df2.nlargest(top_k, 'score')
 
-# ── 3.a) NOUVELLES UTILITIES POUR TOP 4 ─────────────────────────────────
+# ── 3.a) UTILITIES POUR TOP 4 ────────────────────────────────────────────
 def generate_title_variants(title: str) -> list[str]:
     variants = {title.strip()}
     if not title.endswith("s"):
@@ -236,7 +260,8 @@ sel   = st.multiselect("Sélectionnez vos territoires", options=(default_locs+op
 st.session_state['locations'] = sel
 
 exp_level = st.radio("🎯 Expérience", ["Débutant (0-2 ans)", "Expérimenté (2-5 ans)", "Senior (5+ ans)"])
-contract = st.multiselect("📄 Types de contrat", ["CDI","CDD","Freelance","Stage","Alternance"], default=["CDI","CDD","Freelance"])
+contract = st.multiselect("📄 Types de contrat", ["CDI","CDD","Freelance","Stage","Alternance"],
+                          default=["CDI","CDD","Freelance"])
 remote   = st.checkbox("🏠 Full remote")
 
 # ── 5) CLÉS API & IA ───────────────────────────────────────────────────
@@ -269,7 +294,8 @@ if st.button("🚀 Lancer tout"):
         summary = get_gpt_response(prompt_summary, key_openai)
         st.markdown("**Résumé CV:**", unsafe_allow_html=True)
         for line in summary.split('\n'):
-            st.markdown(f"- <span class='cv-summary'>{line.strip()}</span>", unsafe_allow_html=True)
+            st.markdown(f"- <span class='cv-summary'>{line.strip()}</span>",
+                        unsafe_allow_html=True)
 
     # — 6.2) Générations IA
     st.header("🧠 Génération IA")
@@ -314,26 +340,28 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur Pôle-Emploi (code {status}) : {e.response.text}")
         st.stop()
 
-    # — 6.4) Top Offres (requête ciblée)
+    # — 6.4) Mots-clés ATS
+    st.header("🔑 Mots-clés recommandés pour l’ATS")
+    best_metier = scorer_metier(profile, referentiel, top_k=1).iloc[0]
+    kws_ats = build_keywords([best_metier['Activites'], best_metier['Competences']], max_terms=10)
+    for kw in kws_ats.split(','):
+        st.markdown(f"- {kw}")
+
+    # — 6.5) Top Offres (requête ciblée)
     st.header(f"4️⃣ Top offres pour « {job_title} »")
-    variants     = generate_title_variants(job_title)
-    disc_skills  = select_discriminant_skills(skills, vecteur, top_n=5)
-    keywords     = " ".join(variants + disc_skills)
-    all_offres   = []
+    variants    = generate_title_variants(job_title)
+    disc_skills = select_discriminant_skills(skills, vecteur, top_n=5)
+    keywords    = " ".join(variants + disc_skills)
+    all_offres  = []
     for loc in sel:
         loc_norm = normalize_location(loc)
         offs = search_offres(token, keywords, loc_norm, limit=10)
         offs = filter_by_location(offs, loc_norm)
         all_offres.extend(offs)
-
-    # Filtre par type de contrat
     all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
-
-    # Score fuzzy sur le titre et sélection des 4 meilleures
     for o in all_offres:
         o['sim_title'] = fuzz.token_set_ratio(o.get('intitule',''), job_title)
     top4 = sorted(all_offres, key=lambda x: x['sim_title'], reverse=True)[:4]
-
     if top4:
         for o in top4:
             title = o.get('intitule','–')
@@ -349,7 +377,7 @@ if st.button("🚀 Lancer tout"):
     else:
         st.info("Aucune offre pertinente trouvée pour ce poste.")
 
-    # — 6.5) SIS – Métiers recommandés
+    # — 6.6) SIS – Métiers recommandés
     st.header("5️⃣ SIS – Métiers recommandés")
     top6 = scorer_metier(profile, referentiel, top_k=6)
     for _, r in top6.iterrows():
