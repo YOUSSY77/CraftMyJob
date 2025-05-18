@@ -304,40 +304,39 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur Pôle-Emploi (code {status}) : {e.response.text}")
         st.stop()
 
-           # — 6.4) Top Offres pour le titre souhaité —─────────────────────────
-    st.header(f"4️⃣ Top offres pour '{job_title}'")
+    # — 6.4) Top 30 Offres pour le titre souhaité —─────────────────────────
+    st.header(f"4️⃣ Top 30 offres pour '{job_title}'")
 
     # On conserve juste le titre exact pour la query
     keywords   = job_title
     all_offres = []
 
+    # 1) Récupération brute des offres
     for loc in sel:
         loc_norm = normalize_location(loc)
-        # on demande 40 résultats max par territoire, triés par pertinence côté API
-        offs = search_offres(token, keywords, loc_norm, limit=40)
-        offs = filter_by_location(offs, loc_norm)    # ne garde que 75xxx
-    all_offres.extend(offs)
+        # on demande 30 résultats max par territoire
+        offs = search_offres(token, keywords, loc_norm, limit=30)
+        # on ne filtre plus ici, on garde tout
+        all_offres.extend(offs)
 
-# filtre contrat
-all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
+    # 2) Filtre sur le type de contrat
+    all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
 
-
-
-    # déduplication par URL
+    # 3) Déduplication par URL
     seen = {}
     for o in all_offres:
-        url = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
+        url = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine','')
         if url and url not in seen:
             seen[url] = o
     candidates = list(seen.values())
 
-    # scoring composite titre+description
+    # 4) Scoring composite titre+description
     for o in candidates:
         title_score = fuzz.token_set_ratio(o.get('intitule',''), job_title)
         desc_score  = fuzz.token_set_ratio(o.get('description','')[:200], missions)
         o['score_match'] = 0.7 * title_score + 0.3 * desc_score
 
-    # on garde les 30 meilleures
+    # 5) On garde les 30 meilleures
     top30 = sorted(candidates, key=lambda x: x['score_match'], reverse=True)[:30]
 
     if top30:
@@ -346,7 +345,7 @@ all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
             typ   = o.get('typeContrat','–')
             lib   = o['lieuTravail']['libelle']
             dt    = o.get('dateCreation','')[:10]
-            url   = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
+            url   = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine','')
             pct   = int(o['score_match'])
             st.markdown(
                 f"**{title}** ({typ}) – {lib} (_Publié {dt}_)  \n"
@@ -356,7 +355,7 @@ all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
             )
     else:
         st.info("Aucune offre pertinente trouvée pour ce poste.")
-
+        
 
     # — 6.5) SIS Métiers
     st.header("5️⃣ SIS – Métiers recommandés")
