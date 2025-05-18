@@ -113,10 +113,10 @@ def get_gpt_response(prompt: str, key: str) -> str:
 def fetch_ftoken(cid: str, secret: str) -> str:
     url = "https://entreprise.pole-emploi.fr/connexion/oauth2/access_token?realm=/partenaire"
     data = {
-        "grant_type": "client_credentials",
-        "client_id": cid,
+        "grant_type":    "client_credentials",
+        "client_id":     cid,
         "client_secret": secret,
-        "scope": "api_offresdemploiv2 o2dsoffre"
+        "scope":         "api_offresdemploiv2 o2dsoffre"
     }
     r = requests.post(url, data=data, timeout=10)
     r.raise_for_status()
@@ -257,7 +257,7 @@ if st.button("🚀 Lancer tout"):
     st.header("🧠 Génération IA")
     for name in choices:
         inst = tpls[name]
-        if name=="📄 Bio LinkedIn":
+        if name == "📄 Bio LinkedIn":
             inst += " Ne mentionne aucune localisation ni ancienneté, limite à 4 lignes."
         prompt = "\n".join([
             f"Poste: {job_title}",
@@ -275,22 +275,17 @@ if st.button("🚀 Lancer tout"):
             st.subheader(name)
             st.markdown(res)
         except requests.HTTPError as e:
-            st.error(f"Erreur OpenAI ({e.response.status_code}): {e.response.text}")
-            st.stop()
+            st.error(f"Erreur OpenAI ({e.response.status_code}): {e.response.text}"); st.stop()
 
-    
-   # — 6.3) Token Pôle-Emploi (avec debug & strip)
-    # On retire systématiquement espaces et retours à la ligne
+    # 6.3) Token Pôle-Emploi (avec debug & strip)
     cid    = key_pe_id.strip()
     secret = key_pe_secret.strip()
-    # Affiche pour debug sans dévoiler tout : longueur et début de l’ID
-    st.write(f"Pôle-Emploi Client ID reçu (longueur {len(cid)}): '{cid[:5]}…'")
+    st.write(f"🔍 Debug Client ID: '{cid}' (longueur {len(cid)})")
     try:
         token = fetch_ftoken(cid, secret)
         st.success("✅ Token Pôle-Emploi récupéré avec succès")
     except requests.HTTPError as e:
-        # Affiche le code d’erreur et la réponse complète du serveur
-        st.error(f"Erreur Pôle-Emploi ({e.response.status_code}) : {e.response.text}")
+        st.error(f"⛔️ Erreur Pôle-Emploi ({e.response.status_code}) : {e.response.text}")
         st.stop()
 
     # 6.4) Top 30 Offres
@@ -318,7 +313,7 @@ if st.button("🚀 Lancer tout"):
     for o in candidates:
         t_sim = fuzz.token_set_ratio(o.get("intitule",""), job_title)
         d_sim = fuzz.token_set_ratio(o.get("description_extrait","")[:200], missions)
-        o["score_match"] = 0.7*t_sim + 0.3*d_sim
+        o["score_match"] = 0.7 * t_sim + 0.3 * d_sim
 
     top30 = sorted(candidates, key=lambda x: x["score_match"], reverse=True)[:30]
     if top30:
