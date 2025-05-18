@@ -1,4 +1,4 @@
- -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 CraftMyJob – Streamlit app for smart job suggestions
 """
