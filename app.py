@@ -22,7 +22,7 @@ for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
     os.environ.pop(var, None)
 
 # ── 1) STREAMLIT CONFIG & STYLING ─────────────────────────────────────────
-st.set_page_config(page_title="CraftMyJob – JOB SEEKERS HUB France", layout="centered")
+st.set_page_config(page_title="CraftMyJob – Job Seekers Hub France", layout="centered")
 st.markdown("""
 <style>
   .stButton>button { background-color:#2E86C1; color:white; border-radius:4px; }
@@ -38,7 +38,7 @@ try:
     st.image(logo, width=120)
 except:
     pass
-st.title("CraftMyJob – Votre assistant emploi intelligent")
+st.title("✨ CraftMyJob – Votre assistant emploi intelligent")
 
 # ── 2) DATA & MODEL PREP ─────────────────────────────────────────────────
 @st.cache_data
@@ -86,6 +86,22 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
         for rg in r2.json():
             res.append(f"{rg['nom']} (region:{rg['code']})")
     return list(dict.fromkeys(res))
+
+
+def build_keywords(texts: list[str], max_terms: int = 7) -> str:
+    combined = " ".join(texts).lower()
+    tokens = re.findall(r"\w{2,}", combined)
+    stop = {"et","ou","la","le","les","de","des","du","un","une",
+            "à","en","pour","par","avec","sans","sur","dans","au","aux"}
+    seen, kws = set(), []
+    for t in tokens:
+        if t in stop or t in seen:
+            continue
+        seen.add(t)
+        kws.append(t)
+        if len(kws) >= max_terms:
+            break
+    return ",".join(kws)
 
 
 def normalize_location(loc: str) -> str:
@@ -225,149 +241,9 @@ key_openai    = st.text_input("🔑 OpenAI API Key", type="password")
 key_pe_id     = st.text_input("🔑 Pôle-Emploi Client ID", type="password")
 key_pe_secret = st.text_input("🔑 Pôle-Emploi Client Secret", type="password")
 
-tpls = {
-    '📄 Bio LinkedIn':    'Rédige une bio LinkedIn professionnelle.',
-    '✉️ Mail de candidature': 'Écris un mail de candidature spontanée.',
-    '📃 Mini CV':         'Génère un mini-CV (5-7 lignes).',
-    '🧩 CV optimisé IA':  'Optimise le CV en soulignant deux mots-clés.'
-}
-choices = st.multiselect("Générations IA", list(tpls.keys()), default=list(tpls.keys())[:2])
-
 # ── 6) ACTION ─────────────────────────────────────────────────────────
 if st.button("🚀 Lancer tout"):
     if not key_openai:
         st.error("🔑 Clé OpenAI requise")
         st.stop()
-    if not (key_pe_id and key_pe_secret and sel):
-        st.error("🔑 Identifiants Pôle-Emploi et territoires requis")
-        st.stop()
-
-    profile = { 'job_title': job_title, 'missions': missions, 'skills': skills }
-
-    # — 6.1) Résumé CV
-    if cv_text:
-        prompt_summary = f"Résumé en 5 points clés du CV suivant:\n{cv_text[:1000]}"
-        summary = get_gpt_response(prompt_summary, key_openai)
-        st.markdown("**Résumé CV:**", unsafe_allow_html=True)
-        for line in summary.split('\n'):
-            st.markdown(f"- <span class='cv-summary'>{line.strip()}</span>", unsafe_allow_html=True)
-
-    # — 6.2) Générations IA
-    st.header("🧠 Génération IA")
-    for name in choices:
-        instruction = tpls[name]
-        if name == '📄 Bio LinkedIn':
-            instruction += ' Ne mentionne aucune localisation ni ancienneté, limite à 4 lignes.'
-        prompt_lines = [
-            f"Poste: {job_title}",
-            f"Missions: {missions}",
-            f"Compétences: {skills}",
-        ]
-        if cv_text:
-            prompt_lines.append(f"Résumé CV: {summary[:300]}")
-        prompt_lines += [
-            f"Territoires: {', '.join(sel)}",
-            f"Expérience: {exp_level}",
-            f"Contrat(s): {', '.join(contract)}",
-            f"Télétravail: {'Oui' if remote else 'Non'}",
-            '', instruction
-        ]
-        prompt = "\n".join(prompt_lines)
-        try:
-            res = get_gpt_response(prompt, key_openai)
-            st.subheader(name)
-            st.markdown(res)
-            if name == '🧩 CV optimisé IA':
-                buf = PDFGen.to_pdf(res)
-                st.download_button("📥 Télécharger CV optimisé", data=buf, file_name="CV_optimise.pdf", mime="application/pdf")
-        except requests.HTTPError as e:
-            if e.response.status_code == 401:
-                st.error("Clé OpenAI invalide ou expirée.")
-            else:
-                st.error(f"Erreur OpenAI ({e.response.status_code}) : {e.response.text}")
-            st.stop()
-
-    # — 6.3) Token Pôle-Emploi
-    try:
-        token = fetch_ftoken(key_pe_id, key_pe_secret)
-    except requests.HTTPError as e:
-        status = e.response.status_code
-        if status == 401:
-            st.error("🔑 Identifiants Pôle-Emploi invalides ou expirés.")
-        else:
-            st.error(f"Erreur Pôle-Emploi (code {status}) : {e.response.text}")
-        st.stop()
-
-    # — 6.4) Top offres────────────────────────────────────────────────
-    st.header(f"4️⃣ Top offres pour '{job_title}'")
-
-    # Mots-clés ATS
-    ats = build_keywords([missions, skills], max_terms=5)
-    st.markdown("**Mots-clés recommandés :**")
-    for tag in ats.split(","):
-        st.markdown(f"<span class='ats-tag'>{tag}</span>", unsafe_allow_html=True)
-    st.markdown("---")
-
-    all_offres = []
-    for loc in sel:
-        loc_norm = normalize_location(loc)
-        offs = search_offres(token, job_title, loc_norm, limit=5)
-        offs = filter_by_location(offs, loc_norm)
-        all_offres.extend(offs)
-    all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
-
-    seen = {}
-    for o in all_offres:
-        url = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
-        if url and url not in seen:
-            seen[url] = o
-    top_offres = list(seen.values())[:30]
-
-    for o in top_offres:
-        title = o.get('intitule','–')
-        wr = fuzz.WRatio(title, job_title)
-        pr = fuzz.partial_ratio(title, job_title)
-        dr = fuzz.partial_ratio(o.get('description_extrait','')[:200], missions)
-        score = int(0.5*wr + 0.3*pr + 0.2*dr)
-        header = f"{title} — {score}%"
-        with st.expander(header):
-            col1, col2 = st.columns([3,1])
-            with col1:
-                st.markdown(f"- **Contrat** : {o.get('typeContrat','–')}")
-                st.markdown(f"- **Lieu** : {o.get('lieuTravail',{}).get('libelle','–')}")
-                st.markdown(f"- **Publié** : {o.get('dateCreation','')[:10]}")
-                desc = (o.get('description_extrait','') or o.get('description',''))
-                st.markdown(f"**Description :** {desc[:150]}…")
-                st.markdown(f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>", unsafe_allow_html=True)
-            with col2:
-                st.progress(score/100)
-
-    # — 6.5) SIS – Métiers recommandés────────────────────────────────────
-    st.header("5️⃣ SIS – Métiers recommandés")
-    top6 = scorer_metier(profile, referentiel, top_k=6)
-    for _, r in top6.iterrows():
-        st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
-        subs = []
-        for loc in sel:
-            loc_norm = normalize_location(loc)
-            subs.extend(search_offres(token, r['Metier'], loc_norm, limit=3))
-        subs = [o for o in subs if o.get('typeContrat','') in contract]
-        seen2 = set()
-        if subs:
-            for o in subs:
-                url2 = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
-                if not url2 or url2 in seen2: continue
-                seen2.add(url2)
-                title2 = o.get('intitule','–')
-                typ2   = o.get('typeContrat','–')
-                lieu2  = o.get('lieuTravail',{}).get('libelle','–')
-                date2  = o.get('dateCreation','')[:10]
-                desc2  = (o.get('description_extrait','') or o.get('description',''))[:150] + '…'
-                st.markdown(
-                    f"• **{title2}** ({typ2}) – {lieu2} (_Publié {date2}_)  \n"
-                    f"{desc2}  \n"
-                    f"<span class='offer-link'><a href='{url2}' target='_blank'>Voir / Postuler</a></span>",
-                    unsafe_allow_html=True
-                )
-        else:
-            st.info("Aucune offre trouvée pour ce métier dans vos territoires et contrats.")
+    if not (key_pe
