@@ -303,24 +303,27 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur Pôle-Emploi (code {status}) : {e.response.text}")
         st.stop()
 
-        # — 6.4) Top 30 Offres pour le titre souhaité —─────────────────────────
-    st.header(f"4️⃣ Top 30 offres pour '{job_title}'")
-    keywords = job_title  # on conserve le titre exact pour la query
+           # — 6.4) Top 30 Offres pour le titre souhaité —─────────────────────────
+    st.header(f"4️⃣ Top offres pour '{job_title}'")
+
+    # On conserve juste le titre exact pour la query
+    keywords   = job_title
     all_offres = []
+
     for loc in sel:
         loc_norm = normalize_location(loc)
-        # on augmente le limit à 30 pour récupérer plus d'offres
+        # on demande 30 résultats max par territoire, triés par pertinence côté API
         offs = search_offres(token, keywords, loc_norm, limit=30)
-        offs = filter_by_location(offs, loc_norm)
+        # **SUPPRESSION** du filtre côté client pour ne pas écarter d’offres
         all_offres.extend(offs)
 
-    # on filtre par contrat
+    # on filtre ensuite uniquement sur le type de contrat
     all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
 
     # déduplication par URL
     seen = {}
     for o in all_offres:
-        url = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine','')
+        url = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
         if url and url not in seen:
             seen[url] = o
     candidates = list(seen.values())
@@ -331,7 +334,7 @@ if st.button("🚀 Lancer tout"):
         desc_score  = fuzz.token_set_ratio(o.get('description','')[:200], missions)
         o['score_match'] = 0.7 * title_score + 0.3 * desc_score
 
-    # on prend les 30 premières
+    # on garde les 30 meilleures
     top30 = sorted(candidates, key=lambda x: x['score_match'], reverse=True)[:30]
 
     if top30:
@@ -340,7 +343,7 @@ if st.button("🚀 Lancer tout"):
             typ   = o.get('typeContrat','–')
             lib   = o['lieuTravail']['libelle']
             dt    = o.get('dateCreation','')[:10]
-            url   = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine','')
+            url   = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
             pct   = int(o['score_match'])
             st.markdown(
                 f"**{title}** ({typ}) – {lib} (_Publié {dt}_)  \n"
