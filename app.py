@@ -22,7 +22,7 @@ for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
     os.environ.pop(var, None)
 
 # ── 1) STREAMLIT CONFIG & STYLING ─────────────────────────────────────────
-st.set_page_config(page_title="CraftMyJob – Job Seekers Hub France", layout="centered")
+st.set_page_config(page_title="CraftMyJob – JOB SEEKERS HUB France", layout="centered")
 st.markdown("""
 <style>
   .stButton>button { background-color:#2E86C1; color:white; border-radius:4px; }
@@ -30,15 +30,15 @@ st.markdown("""
   h1,h2,h3 { color:#2E86C1; }
   .offer-link a { color:#2E86C1; text-decoration:none; }
   .cv-summary { color:#1F8A70; }
+  .ats-tag { background:#D6EAF8; padding:4px 8px; border-radius:4px; margin-right:4px; display:inline-block; }
 </style>
 """, unsafe_allow_html=True)
-# Logo
 try:
     logo = Image.open("logo_jobseekers.PNG")
     st.image(logo, width=120)
 except:
     pass
-st.title("✨ CraftMyJob – Votre assistant emploi intelligent")
+st.title("CraftMyJob – Votre assistant emploi intelligent")
 
 # ── 2) DATA & MODEL PREP ─────────────────────────────────────────────────
 @st.cache_data
@@ -56,23 +56,7 @@ referentiel = load_referentiel()
 vecteur, tfidf_matrix = build_tfidf(referentiel)
 
 # ── 3) UTILITIES ─────────────────────────────────────────────────────────
-def normalize_location(loc: str) -> str:
-    """Extract plain name or department for API and filtering."""
-    if m := re.match(r"^(.+?) \((\d{5})\)", loc):
-        return m.group(1)
-    if m2 := re.match(r"Département (\d{2})", loc):
-        return m2.group(1)
-    if m3 := re.match(r"^(.+) \(region:(\d+)\)", loc):
-        return m3.group(1)
-    return loc
-
-
-def get_date_range(months: int = 2):
-    end = datetime.now().date()
-    start = end - timedelta(days=months * 30)
-    return start.isoformat(), end.isoformat()
-
-
+@st.cache_data
 def search_territoires(query: str, limit: int = 10) -> list[str]:
     res = []
     if re.fullmatch(r"\d{2}", query):
@@ -86,7 +70,6 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
             res.append(f"{e['nom']} ({cp})")
         res.append(f"Département {query}")
         return list(dict.fromkeys(res))
-    # communes
     r1 = requests.get(
         "https://geo.api.gouv.fr/communes",
         params={"nom": query, "fields": "nom,codesPostaux", "limit": limit}, timeout=5
@@ -95,7 +78,6 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
         for e in r1.json():
             cp = e.get("codesPostaux", ["00000"])[0]
             res.append(f"{e['nom']} ({cp})")
-    # régions
     r2 = requests.get(
         "https://geo.api.gouv.fr/regions",
         params={"nom": query, "fields": "nom,code"}, timeout=5
@@ -106,19 +88,20 @@ def search_territoires(query: str, limit: int = 10) -> list[str]:
     return list(dict.fromkeys(res))
 
 
-def build_keywords(texts: list[str], max_terms: int = 7) -> str:
-    combined = " ".join(texts).lower()
-    tokens = re.findall(r"\w{2,}", combined)
-    stop = {"et","ou","la","le","les","de","des","du","un","une",
-            "à","en","pour","par","avec","sans","sur","dans","au","aux"}
-    seen, kws = set(), []
-    for t in tokens:
-        if t in stop or t in seen:
-            continue
-        seen.add(t); kws.append(t)
-        if len(kws) >= max_terms:
-            break
-    return ",".join(kws)
+def normalize_location(loc: str) -> str:
+    if m := re.match(r"^(.+?) \((\d{5})\)", loc):
+        return m.group(1)
+    if m2 := re.match(r"Département (\d{2})", loc):
+        return m2.group(1)
+    if m3 := re.match(r"^(.+) \(region:(\d+)\)", loc):
+        return m3.group(1)
+    return loc
+
+
+def get_date_range(months: int = 2):
+    end = datetime.now().date()
+    start = end - timedelta(days=months * 30)
+    return start.isoformat(), end.isoformat()
 
 
 def get_gpt_response(prompt: str, key: str) -> str:
@@ -145,7 +128,6 @@ class PDFGen:
         pdf.add_page()
         pdf.set_font("Arial", size=12)
         for line in text.split("\n"):
-            # On remplace les caractères hors Latin-1 pour éviter les erreurs de police
             safe_line = line.encode('latin-1', 'replace').decode('latin-1')
             pdf.multi_cell(0, 8, safe_line)
         pdf.output(buf)
@@ -211,7 +193,6 @@ def scorer_metier(inp: dict, df: pd.DataFrame, top_k: int = 6) -> pd.DataFrame:
 
 # ── 4) PROFILE FORM ──────────────────────────────────────────────────────
 st.header("1️⃣ Profil & préférences")
-# CV upload & extraction
 cv_text = ""
 up = st.file_uploader("📂 CV (optionnel)", type=["pdf","docx","txt"])
 if up:
@@ -317,56 +298,76 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur Pôle-Emploi (code {status}) : {e.response.text}")
         st.stop()
 
-    # — 6.4) Top Offres
+    # — 6.4) Top offres────────────────────────────────────────────────
     st.header(f"4️⃣ Top offres pour '{job_title}'")
-    keywords = job_title
+
+    # Mots-clés ATS
+    ats = build_keywords([missions, skills], max_terms=5)
+    st.markdown("**Mots-clés recommandés :**")
+    for tag in ats.split(","):
+        st.markdown(f"<span class='ats-tag'>{tag}</span>", unsafe_allow_html=True)
+    st.markdown("---")
+
     all_offres = []
     for loc in sel:
         loc_norm = normalize_location(loc)
-        offs = search_offres(token, keywords, loc_norm, limit=5)
+        offs = search_offres(token, job_title, loc_norm, limit=5)
         offs = filter_by_location(offs, loc_norm)
         all_offres.extend(offs)
-    # filtre contrat
     all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
-    # dédup
+
     seen = {}
     for o in all_offres:
         url = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
         if url and url not in seen:
             seen[url] = o
-    if seen:
-        for url, o in list(seen.items())[:5]:
-            title = o.get('intitule','–')
-            lib   = o['lieuTravail']['libelle']
-            cp    = o['lieuTravail']['codePostal']
-            typ   = o.get('typeContrat','–')
-            st.markdown(f"**{title}** ({typ}) – {lib} [{cp}]  \n<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---", unsafe_allow_html=True)
-    else:
-        st.info("Aucune offre trouvée pour ce poste dans vos territoires et contrats.")
+    top_offres = list(seen.values())[:30]
 
-    # — 6.5) SIS Métiers
+    for o in top_offres:
+        title = o.get('intitule','–')
+        wr = fuzz.WRatio(title, job_title)
+        pr = fuzz.partial_ratio(title, job_title)
+        dr = fuzz.partial_ratio(o.get('description_extrait','')[:200], missions)
+        score = int(0.5*wr + 0.3*pr + 0.2*dr)
+        header = f"{title} — {score}%"
+        with st.expander(header):
+            col1, col2 = st.columns([3,1])
+            with col1:
+                st.markdown(f"- **Contrat** : {o.get('typeContrat','–')}")
+                st.markdown(f"- **Lieu** : {o.get('lieuTravail',{}).get('libelle','–')}")
+                st.markdown(f"- **Publié** : {o.get('dateCreation','')[:10]}")
+                desc = (o.get('description_extrait','') or o.get('description',''))
+                st.markdown(f"**Description :** {desc[:150]}…")
+                st.markdown(f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>", unsafe_allow_html=True)
+            with col2:
+                st.progress(score/100)
+
+    # — 6.5) SIS – Métiers recommandés────────────────────────────────────
     st.header("5️⃣ SIS – Métiers recommandés")
     top6 = scorer_metier(profile, referentiel, top_k=6)
     for _, r in top6.iterrows():
         st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
-        kws = r['Metier']
         subs = []
         for loc in sel:
             loc_norm = normalize_location(loc)
-            tmp = search_offres(token, kws, loc_norm, limit=3)
-            tmp = filter_by_location(tmp, loc_norm)
-            subs.extend(tmp)
+            subs.extend(search_offres(token, r['Metier'], loc_norm, limit=3))
         subs = [o for o in subs if o.get('typeContrat','') in contract]
         seen2 = set()
         if subs:
             for o in subs:
                 url2 = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
-                if url2 not in seen2:
-                    seen2.add(url2)
-                    dt   = o.get('dateCreation','')[:10]
-                    lib  = o['lieuTravail']['libelle']
-                    typ  = o.get('typeContrat','–')
-                    desc = (o.get('description','') or '').replace('\n',' ')[:150] + '…'
-                    st.markdown(f"• **{o['intitule']}** ({typ}) – {lib} (_Publié {dt}_)  \n{desc}  \n<span class='offer-link'><a href='{url2}' target='_blank'>Voir / Postuler</a></span>", unsafe_allow_html=True)
+                if not url2 or url2 in seen2: continue
+                seen2.add(url2)
+                title2 = o.get('intitule','–')
+                typ2   = o.get('typeContrat','–')
+                lieu2  = o.get('lieuTravail',{}).get('libelle','–')
+                date2  = o.get('dateCreation','')[:10]
+                desc2  = (o.get('description_extrait','') or o.get('description',''))[:150] + '…'
+                st.markdown(
+                    f"• **{title2}** ({typ2}) – {lieu2} (_Publié {date2}_)  \n"
+                    f"{desc2}  \n"
+                    f"<span class='offer-link'><a href='{url2}' target='_blank'>Voir / Postuler</a></span>",
+                    unsafe_allow_html=True
+                )
         else:
             st.info("Aucune offre trouvée pour ce métier dans vos territoires et contrats.")
