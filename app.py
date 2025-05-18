@@ -313,13 +313,15 @@ if st.button("🚀 Lancer tout"):
 
     for loc in sel:
         loc_norm = normalize_location(loc)
-        # on demande 30 résultats max par territoire, triés par pertinence côté API
-        offs = search_offres(token, keywords, loc_norm, limit=30)
-        # **SUPPRESSION** du filtre côté client pour ne pas écarter d’offres
-        all_offres.extend(offs)
+        # on demande 40 résultats max par territoire, triés par pertinence côté API
+        offs = search_offres(token, keywords, loc_norm, limit=40)
+        offs = filter_by_location(offs, loc_norm)    # ne garde que 75xxx
+    all_offres.extend(offs)
 
-    # on filtre ensuite uniquement sur le type de contrat
-    all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
+# filtre contrat
+all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
+
+
 
     # déduplication par URL
     seen = {}
