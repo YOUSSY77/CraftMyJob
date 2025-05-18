@@ -5,7 +5,6 @@ CraftMyJob – Streamlit app for smart job suggestions
 import os
 import re
 import time
-import io
 import requests
 import pandas as pd
 import streamlit as st
@@ -57,10 +56,12 @@ vecteur, tfidf_matrix = build_tfidf(referentiel)
 
 # ── 3) UTILITIES ─────────────────────────────────────────────────────────
 def normalize_location(loc: str) -> str:
-    if m := re.match(r"^.+? \((\d{2})\)$", loc):
-        return m.group(1)  # département code
-    if m := re.match(r"^(.+?) \((\d{5})\)$", loc):
-        return m.group(2)  # code postal
+    """
+    Retourne le code postal ou le nom de la commune en minuscules.
+    Exemples : "Courbevoie (92400)" -> "92400", "Département 92" -> "92"
+    """
+    if m := re.match(r"^.+? \((\d{5})\)$", loc):
+        return m.group(1)
     if m := re.match(r"Département (\d{2})$", loc):
         return m.group(1)
     return loc.lower()
@@ -200,9 +201,23 @@ def select_discriminant_skills(text: str,
     features = vectorizer.get_feature_names_out()
     idf_vals = vectorizer.idf_
     idf_map = dict(zip(features, idf_vals))
-    scored = [(t, idf_map.get(t, 0)) for t in set(tokens)]
-    scored = sorted(scored, key=lambda x: x[1], reverse=True)
+    scored = sorted({(t, idf_map.get(t, 0)) for t in tokens},
+                    key=lambda x: x[1], reverse=True)
     return [t for t,_ in scored[:top_n]]
+
+def filter_by_location(offers: list, loc_norm: str) -> list:
+    """
+    Filtre les offres pour ne garder que celles dont
+    'lieuTravail_codePostal' correspond au loc_norm
+    ou dont 'lieuTravail_libelle' contient loc_norm.
+    """
+    out = []
+    for o in offers:
+        cp = str(o.get('lieuTravail_codePostal', '') or o.get('code_postal', ''))
+        lib = o.get('lieuTravail_libelle', '').lower()
+        if loc_norm in cp or loc_norm in lib:
+            out.append(o)
+    return out
 
 # ── 4) PROFILE FORM ──────────────────────────────────────────────────────
 st.header("1️⃣ Profil & préférences")
@@ -260,16 +275,18 @@ if st.button("🚀 Lancer tout"):
 
     profile = {'job_title': job_title, 'missions': missions, 'skills': skills}
 
-    # 6.1) Résumé CV
+    # — 6.1) Résumé CV
     if cv_text:
-        summary = get_gpt_response(f"Résumé en 5 points clés du CV suivant:\n{cv_text[:1000]}",
-                                   key_openai)
+        summary = get_gpt_response(
+            f"Résumé en 5 points clés du CV suivant:\n{cv_text[:1000]}",
+            key_openai
+        )
         st.markdown("**Résumé CV:**", unsafe_allow_html=True)
         for line in summary.split('\n'):
             st.markdown(f"- <span class='cv-summary'>{line.strip()}</span>",
                         unsafe_allow_html=True)
 
-    # 6.2) Générations IA
+    # — 6.2) Générations IA
     st.header("🧠 Génération IA")
     for name in choices:
         inst = tpls[name]
@@ -294,14 +311,14 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur OpenAI ({e.response.status_code}) : {e.response.text}")
             st.stop()
 
-    # 6.3) Token Pôle-Emploi
+    # — 6.3) Token Pôle-Emploi
     try:
         token = fetch_ftoken(key_pe_id, key_pe_secret)
     except requests.HTTPError as e:
         st.error(f"Erreur Pôle-Emploi ({e.response.status_code}) : {e.response.text}")
         st.stop()
 
-    # 6.4) Mots-clés ATS (discriminants via TF-IDF)
+    # — 6.4) Mots-clés ATS
     st.header("🔑 Mots-clés recommandés pour l’ATS")
     best = scorer_metier(profile, referentiel, top_k=1).iloc[0]
     combined = best['Activites'] + " " + best['Competences']
@@ -309,46 +326,46 @@ if st.button("🚀 Lancer tout"):
     for kw in ats_keys:
         st.markdown(f"- {kw}")
 
-    # 6.5) Top Offres (strictement pour le titre souhaité)
+    # — 6.5) Top Offres pour le titre souhaité
     st.header(f"4️⃣ Top offres pour « {job_title} »")
-    # on envoie juste le titre exact pour ne pas élargir
-    mots_cles = job_title
+    mots_cles = job_title  # on envoie strictement le titre
     all_offres = []
     for loc in sel:
         loc_norm = normalize_location(loc)
         offs = search_offres(token, mots_cles, loc_norm, limit=25)
-        # on retire tout filtrage local ici pour laisser l'API gérer la localisation
+        # filtre côté client selon les bons champs renvoyés
+        offs = filter_by_location(offs, loc_norm)
         all_offres.extend(offs)
 
-    # contraction par URL unique
+    # dédup par URL
     seen = {}
     for o in all_offres:
-        url = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine', '')
+        url = o.get('url', '')
         if url and url not in seen:
             seen[url] = o
     candidates = list(seen.values())
 
-    # on score fuzzy uniquement sur l'intitulé
+    # score fuzzy sur l'intitulé
     for o in candidates:
         o['sim_title'] = fuzz.token_set_ratio(o.get('intitule', ''), job_title)
-
     top4 = sorted(candidates, key=lambda x: x['sim_title'], reverse=True)[:4]
+
     if top4:
         for o in top4:
             title = o.get('intitule', '–')
-            lib   = o['lieuTravail']['libelle']
-            cp    = o['lieuTravail']['codePostal']
-            typ   = o.get('typeContrat', '–')
-            url   = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine', '')
+            contract_type = o.get('typeContrat', '–')
+            libelle = o.get('lieuTravail_libelle', '–')
+            cp = o.get('lieuTravail_codePostal', o.get('code_postal', '–'))
+            url = o.get('url', '')
             st.markdown(
-                f"**{title}** ({typ}) – {lib} [{cp}]  \n"
+                f"**{title}** ({contract_type}) – {libelle} [{cp}]  \n"
                 f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---",
                 unsafe_allow_html=True
             )
     else:
         st.info("Aucune offre pertinente trouvée pour ce poste.")
 
-    # 6.6) SIS – Métiers recommandés
+    # — 6.6) SIS – Métiers recommandés
     st.header("5️⃣ SIS – Métiers recommandés")
     top6 = scorer_metier(profile, referentiel, top_k=6)
     for _, r in top6.iterrows():
@@ -357,16 +374,16 @@ if st.button("🚀 Lancer tout"):
         for loc in sel:
             loc_norm = normalize_location(loc)
             subs.extend(search_offres(token, r['Metier'], loc_norm, limit=5))
-        # dédup et affichage comme avant...
+        # dédup & affiche comme précédemment...
         seen2 = set()
         for o in subs:
-            url2 = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine', '')
+            url2 = o.get('url', '')
             if url2 and url2 not in seen2:
                 seen2.add(url2)
                 dt = o.get('dateCreation', '')[:10]
-                lib2 = o['lieuTravail']['libelle']
-                typ2 = o.get('typeContrat', '–')
-                desc = (o.get('description', '') or '').replace('\n', ' ')[:150] + '…'
+                lib2 = o.get('lieuTravail_libelle', '')
+                typ2 = o.get('typeContrat', '')
+                desc = o.get('description_extrait', '').replace('\n',' ')[:150] + '…'
                 st.markdown(
                     f"• **{o['intitule']}** ({typ2}) – {lib2} (_Publié {dt}_)  \n"
                     f"{desc}  \n"
@@ -375,5 +392,3 @@ if st.button("🚀 Lancer tout"):
                 )
         if not subs:
             st.info("Aucune offre trouvée pour ce métier dans vos territoires et contrats.")
-
-    
