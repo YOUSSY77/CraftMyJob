@@ -144,8 +144,11 @@ class PDFGen:
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=12)
-        for line in text.split("\n"):
-            pdf.multi_cell(0, 8, line)
+        for line in text.split("
+"):
+            # On remplace les caractères hors Latin-1 pour éviter les erreurs de police
+            safe_line = line.encode('latin-1', 'replace').decode('latin-1')
+            pdf.multi_cell(0, 8, safe_line)
         pdf.output(buf)
         buf.seek(0)
         return buf
@@ -368,3 +371,4 @@ if st.button("🚀 Lancer tout"):
                     st.markdown(f"• **{o['intitule']}** ({typ}) – {lib} (_Publié {dt}_)  \n{desc}  \n<span class='offer-link'><a href='{url2}' target='_blank'>Voir / Postuler</a></span>", unsafe_allow_html=True)
         else:
             st.info("Aucune offre trouvée pour ce métier dans vos territoires et contrats.")
+
