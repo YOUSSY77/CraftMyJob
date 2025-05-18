@@ -303,18 +303,20 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur Pôle-Emploi (code {status}) : {e.response.text}")
         st.stop()
 
-    # — 6.4) Top 10 Offres
-    st.header(f"4️⃣ Top 10 offres pour '{job_title}'")
-    # on conserve le titre exact pour la query
-    keywords = job_title
+        # — 6.4) Top 30 Offres pour le titre souhaité —─────────────────────────
+    st.header(f"4️⃣ Top 30 offres pour '{job_title}'")
+    keywords = job_title  # on conserve le titre exact pour la query
     all_offres = []
     for loc in sel:
         loc_norm = normalize_location(loc)
-        offs = search_offres(token, keywords, loc_norm, limit=25)
+        # on augmente le limit à 30 pour récupérer plus d'offres
+        offs = search_offres(token, keywords, loc_norm, limit=30)
         offs = filter_by_location(offs, loc_norm)
         all_offres.extend(offs)
-    # filtre contrat
+
+    # on filtre par contrat
     all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
+
     # déduplication par URL
     seen = {}
     for o in all_offres:
@@ -322,29 +324,33 @@ if st.button("🚀 Lancer tout"):
         if url and url not in seen:
             seen[url] = o
     candidates = list(seen.values())
-    # scoring composite
+
+    # scoring composite titre+description
     for o in candidates:
         title_score = fuzz.token_set_ratio(o.get('intitule',''), job_title)
         desc_score  = fuzz.token_set_ratio(o.get('description','')[:200], missions)
         o['score_match'] = 0.7 * title_score + 0.3 * desc_score
-    top10 = sorted(candidates, key=lambda x: x['score_match'], reverse=True)[:10]
-    if top10:
-        for o in top10:
+
+    # on prend les 30 premières
+    top30 = sorted(candidates, key=lambda x: x['score_match'], reverse=True)[:30]
+
+    if top30:
+        for o in top30:
             title = o.get('intitule','–')
             typ   = o.get('typeContrat','–')
             lib   = o['lieuTravail']['libelle']
-            cp    = o['lieuTravail']['codePostal']
             dt    = o.get('dateCreation','')[:10]
             url   = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine','')
             pct   = int(o['score_match'])
             st.markdown(
-                f"**{title}** ({typ}) – {lib} [{cp}] (_Publié {dt}_)  \n"
+                f"**{title}** ({typ}) – {lib} (_Publié {dt}_)  \n"
                 f"Score matching : **{pct}%**  \n"
                 f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---",
                 unsafe_allow_html=True
             )
     else:
         st.info("Aucune offre pertinente trouvée pour ce poste.")
+
 
     # — 6.5) SIS Métiers
     st.header("5️⃣ SIS – Métiers recommandés")
