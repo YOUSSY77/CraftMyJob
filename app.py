@@ -144,7 +144,8 @@ class PDFGen:
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=12)
-        for line in text.split("\n"):
+        for line in text.split("
+"):
             # On remplace les caractères hors Latin-1 pour éviter les erreurs de police
             safe_line = line.encode('latin-1', 'replace').decode('latin-1')
             pdf.multi_cell(0, 8, safe_line)
@@ -227,7 +228,7 @@ job_title = st.text_input("🔤 Poste souhaité")
 missions  = st.text_area("📋 Missions principales")
 skills    = st.text_area("🧠 Compétences clés")
 
-st.markdown("<div class='section-header'>🌍 Territoires</div>", unsafe_allow_html=True)
+st.markdown("""<div class='section-header'>🌍 Territoires</div>""", unsafe_allow_html=True)
 typed = st.text_input("Tapez commune/département/région…")
 opts  = search_territoires(typed) if typed else []
 default_locs = st.session_state.get('locations', [])
