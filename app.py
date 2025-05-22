@@ -317,79 +317,56 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur Pôle-Emploi (code {status}) : {e.response.text}")
         st.stop()
 
-    # — 6.4) Top 30 Offres (amélioré)
-st.header(f"4️⃣ Top 30 offres pour '{job_title}'")
-keywords = job_title  # vous pouvez ajouter des variantes ici
-all_offres = []
-for loc in sel:
-    loc_norm = normalize_location(loc)
-    offs = search_offres(token, keywords, loc_norm, limit=30)
-    offs = filter_by_location(offs, loc_norm)
-    all_offres.extend(offs)
-# Filtre contrat
-all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
-# Déduplication
-seen = {}
-for o in all_offres:
-    url = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine','')
-    if url and url not in seen:
-        seen[url] = o
-candidates = list(seen.values())
-# Filtre géographique strict
-def geo_ok(o, loc_norm):
-    lib = str(o['lieuTravail']['libelle']).lower()
-    cp  = str(o['lieuTravail']['codePostal'])
-    if loc_norm.isdigit():
-        return cp.startswith(loc_norm)
-    return loc_norm.lower() in lib
-filtered = [o for o in candidates if any(geo_ok(o, normalize_location(loc)) for loc in sel)]
-# Scoring TF-IDF + fuzzy
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from rapidfuzz import fuzz
-texts = [str(o.get('intitule','')) + ' ' + str(o.get('description','')) for o in filtered]
-vect = TfidfVectorizer(max_features=1000)
-X = vect.fit_transform(texts)
-q = vect.transform([job_title])
-# Calcul mix score
-scores = []
-for i, o in enumerate(filtered):
-    cos = float(cosine_similarity(q, X[i:i+1])[0][0])
-    fuzz_score = fuzz.WRatio(o.get('intitule',''), job_title) / 100
-    mix = 0.7 * cos + 0.3 * fuzz_score
-    scores.append((mix, o))
-# Affichage Top30
-top30 = sorted(scores, key=lambda x: x[0], reverse=True)[:30]
-for mix, o in top30:
-    title = o.get('intitule','–')
-    typ   = o.get('typeContrat','–')
-    lib   = o['lieuTravail']['libelle']
-    dt    = o.get('dateCreation','')[:10]
-    url   = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine','')
-    pct   = int(mix * 100)
-    st.markdown(
-        f"**{title}** ({typ}) – {lib} (_Publié {dt}_)  \n"
-        f"Score: **{pct}%**  \n"
-        f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---",
-        unsafe_allow_html=True
-    )
+    # — 6.4) Top Offres
+    st.header(f"4️⃣ Top offres pour '{job_title}'")
+    keywords = job_title
+    all_offres = []
+    for loc in sel:
+        loc_norm = normalize_location(loc)
+        offs = search_offres(token, keywords, loc_norm, limit=5)
+        offs = filter_by_location(offs, loc_norm)
+        all_offres.extend(offs)
+    # filtre contrat
+    all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
+    # dédup
+    seen = {}
+    for o in all_offres:
+        url = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
+        if url and url not in seen:
+            seen[url] = o
+    if seen:
+        for url, o in list(seen.items())[:5]:
+            title = o.get('intitule','–')
+            lib   = o['lieuTravail']['libelle']
+            cp    = o['lieuTravail']['codePostal']
+            typ   = o.get('typeContrat','–')
+            st.markdown(f"**{title}** ({typ}) – {lib} [{cp}]  \n<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---", unsafe_allow_html=True)
+    else:
+        st.info("Aucune offre trouvée pour ce poste dans vos territoires et contrats.")
 
-# — 6.5) SIS Métiers (amélioré)
-st.header("5️⃣ SIS – Métiers recommandés")
-# Comptage romeCode
-rome_counts = {}
-for o in candidates:
-    code = o.get('romeCode')
-    if code:
-        rome_counts[code] = rome_counts.get(code, 0) + 1
-# Scoring SIS
-sis_df = scorer_metier(profile, referentiel, top_k=len(referentiel))
-sis_df = sis_df.rename(columns={'Metier':'metier','score':'sis_score'})
-sis_df['romeCode'] = sis_df['metier'].map(referentiel.set_index('Metier')['romeCode'])
-sis_df['freq'] = sis_df['romeCode'].map(rome_counts).fillna(0)
-max_freq = max(rome_counts.values()) if rome_counts else 1
-sis_df['final'] = 0.7 * sis_df['sis_score'] + 0.3 * (sis_df['freq'] / max_freq * 100)
-# Affichage Top6
-top6 = sis_df.nlargest(6, 'final')
-for _, r in top6.iterrows():
-    st.markdown(f"**{r['metier']}** – {int(r['final'])}% ({int(r['freq'])} offres)")
+    # — 6.5) SIS Métiers
+    st.header("5️⃣ SIS – Métiers recommandés")
+    top6 = scorer_metier(profile, referentiel, top_k=6)
+    for _, r in top6.iterrows():
+        st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
+        kws = r['Metier']
+        subs = []
+        for loc in sel:
+            loc_norm = normalize_location(loc)
+            tmp = search_offres(token, kws, loc_norm, limit=3)
+            tmp = filter_by_location(tmp, loc_norm)
+            subs.extend(tmp)
+        subs = [o for o in subs if o.get('typeContrat','') in contract]
+        seen2 = set()
+        if subs:
+            for o in subs:
+                url2 = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
+                if url2 not in seen2:
+                    seen2.add(url2)
+                    dt   = o.get('dateCreation','')[:10]
+                    lib  = o['lieuTravail']['libelle']
+                    typ  = o.get('typeContrat','–')
+                    desc = (o.get('description','') or '').replace('\n',' ')[:150] + '…'
+                    st.markdown(f"• **{o['intitule']}** ({typ}) – {lib} (_Publié {dt}_)  \n{desc}  \n<span class='offer-link'><a href='{url2}' target='_blank'>Voir / Postuler</a></span>", unsafe_allow_html=True)
+        else:
+            st.info("Aucune offre trouvée pour ce métier dans vos territoires et contrats.")
