@@ -330,43 +330,46 @@ for loc in sel:
     offs = fetch_all_offres(token, keywords, loc_norm)
     all_offres.extend(offs)
 
-# Construction du DataFrame avec extraction manuelle du lieu
+# Construction du DataFrame avec extraction manuelle du lieu et typeContrat
 import pandas as _pd
 rows = []
 for o in all_offres:
     row = o.copy()
     lt = o.get('lieuTravail', {})
-    row['codePostal'] = lt.get('codePostal', '')
+    # codePostal et libellé
+    row['codePostal']  = lt.get('codePostal', '')
     row['lieuLibelle'] = lt.get('libelle', '')
+    # garantir la présence de 'typeContrat'
+    row['typeContrat'] = o.get('typeContrat') or o.get('typeContratLibelle') or ''
     rows.append(row)
-df_off = _pd.DataFrame(rows)
+# DataFrame
+_df = _pd.DataFrame(rows)
 
-# Filtre contrat
-df_off = df_off[df_off['typeContrat'].isin(contract)]
+# Filtre contrat (avec fallback)
+_df['typeContrat'] = _df['typeContrat'].fillna('')
+_df = _df[_df['typeContrat'].isin(contract)]
 
-# Filtre géographique strict par code postal ou libellé
-def _geo_filter(row, loc):
-    cp = str(row.get('codePostal', ''))
+# Filtre géographique strict (par codePostal ou libellé)
+def _geo_filter(r, loc):
+    cp = str(r.get('codePostal', ''))
     if loc.isdigit():
         return cp.startswith(loc)
-    return loc.lower() in row.get('lieuLibelle', '').lower()
-
+    return loc.lower() in r.get('lieuLibelle', '').lower()
 filtered = []
 for loc in sel:
     loc_norm = normalize_location(loc)
-    filtered.extend([r for _, r in df_off.iterrows() if _geo_filter(r, loc_norm)])
+    filtered.extend([r for _, r in _df.iterrows() if _geo_filter(r, loc_norm)])
 _df = _pd.DataFrame(filtered).drop_duplicates(subset=['id'])
 
 # Calcul des similarités (TF-IDF + fuzzy)
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from rapidfuzz import fuzz
-
 text_corpus = _df['intitule'] + ' ' + _df.get('description_extrait', _df.get('description', ''))
 vect = TfidfVectorizer(max_features=2000, stop_words="french")
 X = vect.fit_transform(text_corpus)
 q = vect.transform([job_title])
-_df['sim_cosine'] = cosine_similarity(q, X).flatten()
+_df['sim_cosine']      = cosine_similarity(q, X).flatten()
 _df['sim_title_fuzzy'] = _df['intitule'].apply(lambda t: fuzz.WRatio(t, job_title) / 100)
 
 # Score mixte 70% TF-IDF + 30% fuzzy, seuil à 0.5
@@ -377,11 +380,12 @@ df_scores = _df[_df['score_mix'] >= 0.5]
 top30 = df_scores.nlargest(30, 'score_mix')
 for _, o in top30.iterrows():
     title = o.get('intitule', '–')
-    typ = o.get('typeContrat', '–')
-    lib = o.get('lieuLibelle', '–')
-    dt = o.get('dateCreation', '')[:10]
-    url = o.get('url') or o.get('contact', {}).get('urlPostulation', '')
-    pct = int(o['score_mix'] * 100)
+    typ   = o.get('typeContrat', '–')
+    lib   = o.get('lieuLibelle', '–')
+    dt    = o.get('dateCreation', '')[:10]
+    # URL de postulation
+    url = o.get('url') or o.get('contact', {}).get('urlPostulation', '') or o.get('contact', {}).get('urlOrigine', '')
+    pct   = int(o['score_mix'] * 100)
     st.markdown(
         f"**{title}** ({typ}) – {lib} (_Publié {dt}_)  \n"
         f"Score: **{pct}%**  \n"
@@ -392,13 +396,13 @@ for _, o in top30.iterrows():
 # 6.5) SIS – Métiers recommandés optimisé
 st.header("5️⃣ SIS – Métiers recommandés")
 
-# Comptage des romeCode dans le référentiel des offres
+# Comptage des romeCode dans les offres récupérées
 rome_counts = _pd.Series([row.get('romeCode') for row in rows]).value_counts().rename('freq').reset_index().rename(columns={'index':'romeCode'})
 
 # Scoring SIS (profil vs référentiel)
 sis_df = scorer_metier(profile, referentiel, top_k=len(referentiel))
 sis_df = sis_df.rename(columns={'Metier':'metier','score':'sis_score'})
-# Récupère le romeCode correspondant pour chaque metier
+# Association du romeCode
 sis_df['romeCode'] = sis_df['metier'].map(referentiel.set_index('Metier')['romeCode'])
 # Fusion fréquence et remplissage
 sis_df = sis_df.merge(rome_counts, on='romeCode', how='left').fillna({'freq':0})
