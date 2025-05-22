@@ -317,7 +317,7 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur Pôle-Emploi (code {status}) : {e.response.text}")
         st.stop()
 
-# — 6.4) Top 30 Offres (amélioré)
+    # — 6.4) Top 30 Offres (amélioré)
 st.header(f"4️⃣ Top 30 offres pour '{job_title}'")
 keywords = job_title  # vous pouvez ajouter des variantes ici
 all_offres = []
@@ -326,47 +326,39 @@ for loc in sel:
     offs = search_offres(token, keywords, loc_norm, limit=30)
     offs = filter_by_location(offs, loc_norm)
     all_offres.extend(offs)
-
 # Filtre contrat
 all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
-# Déduplication par URL
+# Déduplication
 seen = {}
 for o in all_offres:
     url = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine','')
     if url and url not in seen:
         seen[url] = o
 candidates = list(seen.values())
-
-# Filtre géographique strict (code postal ou libellé)
+# Filtre géographique strict
 def geo_ok(o, loc_norm):
-    lib = o['lieuTravail']['libelle'].lower()
+    lib = str(o['lieuTravail']['libelle']).lower()
     cp  = str(o['lieuTravail']['codePostal'])
     if loc_norm.isdigit():
         return cp.startswith(loc_norm)
     return loc_norm.lower() in lib
-filtered = []
-for o in candidates:
-    for loc in sel:
-        if geo_ok(o, normalize_location(loc)):
-            filtered.append(o)
-            break
-
-# Scoring fuzzy (titre) et TF-IDF léger
+filtered = [o for o in candidates if any(geo_ok(o, normalize_location(loc)) for loc in sel)]
+# Scoring TF-IDF + fuzzy
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from rapidfuzz import fuzz
-texts = [f"{o['intitule']} {o.get('description','')}" for o in filtered]
-vect = TfidfVectorizer(stop_words='french', max_features=1000)
+texts = [str(o.get('intitule','')) + ' ' + str(o.get('description','')) for o in filtered]
+vect = TfidfVectorizer(max_features=1000)
 X = vect.fit_transform(texts)
 q = vect.transform([job_title])
+# Calcul mix score
 scores = []
-for idx, o in enumerate(filtered):
-    cos = cosine_similarity(q, X[idx]) if hasattr(X, '__getitem__') else cosine_similarity(q, X[idx:idx+1])[0][0]
-    fuzz_score = fuzz.WRatio(o['intitule'], job_title) / 100
+for i, o in enumerate(filtered):
+    cos = float(cosine_similarity(q, X[i:i+1])[0][0])
+    fuzz_score = fuzz.WRatio(o.get('intitule',''), job_title) / 100
     mix = 0.7 * cos + 0.3 * fuzz_score
     scores.append((mix, o))
-
-# Top30
+# Affichage Top30
 top30 = sorted(scores, key=lambda x: x[0], reverse=True)[:30]
 for mix, o in top30:
     title = o.get('intitule','–')
@@ -376,7 +368,7 @@ for mix, o in top30:
     url   = o.get('contact', {}).get('urlPostulation') or o.get('contact', {}).get('urlOrigine','')
     pct   = int(mix * 100)
     st.markdown(
-        f"**{title}** ({typ}) – {lib} (_{dt}_)  \n"
+        f"**{title}** ({typ}) – {lib} (_Publié {dt}_)  \n"
         f"Score: **{pct}%**  \n"
         f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---",
         unsafe_allow_html=True
@@ -384,16 +376,20 @@ for mix, o in top30:
 
 # — 6.5) SIS Métiers (amélioré)
 st.header("5️⃣ SIS – Métiers recommandés")
-# On compte les romeCode dans les offres candidates
+# Comptage romeCode
 rome_counts = {}
-for _, o in candidates:
+for o in candidates:
     code = o.get('romeCode')
     if code:
         rome_counts[code] = rome_counts.get(code, 0) + 1
-# Calcul SIS
+# Scoring SIS
 sis_df = scorer_metier(profile, referentiel, top_k=len(referentiel))
+sis_df = sis_df.rename(columns={'Metier':'metier','score':'sis_score'})
+sis_df['romeCode'] = sis_df['metier'].map(referentiel.set_index('Metier')['romeCode'])
 sis_df['freq'] = sis_df['romeCode'].map(rome_counts).fillna(0)
-sis_df['final'] = 0.7 * sis_df['score'] + 0.3 * (sis_df['freq'] / max(rome_counts.values(), default=1) * 100)
+max_freq = max(rome_counts.values()) if rome_counts else 1
+sis_df['final'] = 0.7 * sis_df['sis_score'] + 0.3 * (sis_df['freq'] / max_freq * 100)
+# Affichage Top6
 top6 = sis_df.nlargest(6, 'final')
 for _, r in top6.iterrows():
-    st.markdown(f"**{r['Metier']}** – {int(r['final'])}% ({int(r['freq'])} offres) ")
+    st.markdown(f"**{r['metier']}** – {int(r['final'])}% ({int(r['freq'])} offres)")
