@@ -317,56 +317,95 @@ if st.button("🚀 Lancer tout"):
             st.error(f"Erreur Pôle-Emploi (code {status}) : {e.response.text}")
         st.stop()
 
-    # — 6.4) Top Offres
-    st.header(f"4️⃣ Top offres pour '{job_title}'")
-    keywords = job_title
-    all_offres = []
-    for loc in sel:
-        loc_norm = normalize_location(loc)
-        offs = search_offres(token, keywords, loc_norm, limit=5)
-        offs = filter_by_location(offs, loc_norm)
-        all_offres.extend(offs)
-    # filtre contrat
-    all_offres = [o for o in all_offres if o.get('typeContrat','') in contract]
-    # dédup
-    seen = {}
-    for o in all_offres:
-        url = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
-        if url and url not in seen:
-            seen[url] = o
-    if seen:
-        for url, o in list(seen.items())[:5]:
-            title = o.get('intitule','–')
-            lib   = o['lieuTravail']['libelle']
-            cp    = o['lieuTravail']['codePostal']
-            typ   = o.get('typeContrat','–')
-            st.markdown(f"**{title}** ({typ}) – {lib} [{cp}]  \n<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---", unsafe_allow_html=True)
-    else:
-        st.info("Aucune offre trouvée pour ce poste dans vos territoires et contrats.")
+    # 6.4) Top 30 Offres optimisé
+st.header(f"4️⃣ Top 30 offres pour '{job_title}'")
 
-    # — 6.5) SIS Métiers
-    st.header("5️⃣ SIS – Métiers recommandés")
-    top6 = scorer_metier(profile, referentiel, top_k=6)
-    for _, r in top6.iterrows():
-        st.markdown(f"**{r['Metier']}** – {int(r['score'])}%")
-        kws = r['Metier']
-        subs = []
-        for loc in sel:
-            loc_norm = normalize_location(loc)
-            tmp = search_offres(token, kws, loc_norm, limit=3)
-            tmp = filter_by_location(tmp, loc_norm)
-            subs.extend(tmp)
-        subs = [o for o in subs if o.get('typeContrat','') in contract]
-        seen2 = set()
-        if subs:
-            for o in subs:
-                url2 = o.get('contact',{}).get('urlPostulation') or o.get('contact',{}).get('urlOrigine','')
-                if url2 not in seen2:
-                    seen2.add(url2)
-                    dt   = o.get('dateCreation','')[:10]
-                    lib  = o['lieuTravail']['libelle']
-                    typ  = o.get('typeContrat','–')
-                    desc = (o.get('description','') or '').replace('\n',' ')[:150] + '…'
-                    st.markdown(f"• **{o['intitule']}** ({typ}) – {lib} (_Publié {dt}_)  \n{desc}  \n<span class='offer-link'><a href='{url2}' target='_blank'>Voir / Postuler</a></span>", unsafe_allow_html=True)
-        else:
-            st.info("Aucune offre trouvée pour ce métier dans vos territoires et contrats.")
+# Enrichissement des mots-clés (titre + variantes + synonymes)
+variants = generate_title_variants(job_title)
+keywords = " ".join(variants)
+
+# Récupération paginée
+all_offres = []
+for loc in sel:
+    dept = normalize_location(loc)  # ex. '75' ou 'Paris'
+    offs = fetch_all_offres(token, keywords, dept)
+    all_offres.extend(offs)
+
+# Déplie le lieuTravail pour filtrage
+import pandas as _pd
+locs = _pd.json_normalize(all_offres)
+locs = locs.rename(columns={
+    'lieuTravail.codePostal': 'codePostal',
+    'lieuTravail.libelle': 'lieuLibelle'
+})
+# Concatène avec les données originales
+df_off = _pd.DataFrame(all_offres)
+for col in ['codePostal', 'lieuLibelle']:
+    df_off[col] = locs[col]
+
+# Filtre contrat
+df_off = df_off[df_off['typeContrat'].isin(contract)]
+# Filtre géographique strict (par code postal ou texte)
+def filter_geo(row, loc_norm):
+    cp = str(row['codePostal'])
+    if loc_norm.isdigit():
+        return cp.startswith(loc_norm)
+    return loc_norm.lower() in row['lieuLibelle'].lower()
+
+df_geo = _pd.concat([
+    df_off[df_off.apply(lambda r: filter_geo(r, normalize_location(loc)), axis=1)]
+    for loc in sel
+])
+
+df_geo = df_geo.drop_duplicates(subset=['id'])
+
+# Calcul des similarités
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from rapidfuzz import fuzz
+
+vect = TfidfVectorizer(max_features=2000, stop_words="french")
+X = vect.fit_transform(df_geo['intitule'] + ' ' + df_geo.get('description_extrait', df_geo.get('description', '')))
+q = vect.transform([job_title])
+df_geo['sim_cosine'] = cosine_similarity(q, X).flatten()
+df_geo['sim_title_fuzzy'] = df_geo['intitule'].apply(lambda t: fuzz.WRatio(t, job_title) / 100)
+
+# Mix score 70% TF-IDF + 30% fuzzy
+df_geo['score_mix'] = 0.7 * df_geo['sim_cosine'] + 0.3 * df_geo['sim_title_fuzzy']
+# Seuil 0.5
+df_geo = df_geo[df_geo['score_mix'] >= 0.5]
+
+# Top30
+top30 = df_geo.nlargest(30, 'score_mix')
+for _, o in top30.iterrows():
+    title = o['intitule'] or '–'
+    typ   = o.get('typeContrat','–')
+    lib   = o['lieuLibelle']
+    dt    = o.get('dateCreation','')[:10]
+    url   = o.get('url') or o.get('contact',{}).get('urlPostulation','')
+    pct   = int(o['score_mix'] * 100)
+    st.markdown(
+        f"**{title}** ({typ}) – {lib} (_Publié {dt}_)  \n"
+        f"Score: **{pct}%**  \n"
+        f"<span class='offer-link'><a href='{url}' target='_blank'>Voir l'offre</a></span>\n---",
+        unsafe_allow_html=True
+    )
+
+# 6.5) SIS – Métiers recommandés optimisé
+st.header("5️⃣ SIS – Métiers recommandés")
+
+# Compte des ROME dans les offres brutes
+rome_counts = _pd.Series(df['romeCode']).value_counts().rename('freq').reset_index().rename(columns={'index':'romeCode'})
+# Calcul SIS classique
+sis_df = scorer_metier(profile, referentiel, top_k=len(referentiel))
+sis_df = sis_df.rename(columns={'Metier':'metier','score':'sis_score','romeCode':'romeCode'})
+# Fusion sur romeCode
+sis_df = sis_df.merge(rome_counts, on='romeCode', how='left').fillna({'freq':0})
+# Score final 70% SIS + 30% fréquence normalisée
+max_freq = sis_df['freq'].max() or 1
+sis_df['final_score'] = 0.7 * sis_df['sis_score'] + 0.3 * (sis_df['freq'] / max_freq * 100)
+
+# Top 6
+top6 = sis_df.nlargest(6, 'final_score')
+for _, r in top6.iterrows():
+    st.markdown(f"**{r['metier']}** – {int(r['final_score'])}% ({int(r['freq'])} offres)")
